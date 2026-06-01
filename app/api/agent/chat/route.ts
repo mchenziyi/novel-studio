@@ -23,11 +23,7 @@ function buildSystemPrompt(context: string, chapterContent?: string, allChapters
 - 善于制造悬念和钩子
 - 注重情节节奏，张弛有度
 - 人物对话鲜活，符合角色性格
-- 善于运用伏笔和回收
-
-当前项目：《开局屠村现场-他们说我疯了》
-类型：悬疑/惊悚/超自然
-主角：周醒，穿越到诡异世界，拥有白页簿（能记录和影响现实的神秘账簿）`;
+- 善于运用伏笔和回收`;
 
   const contextPrompts: Record<string, string> = {
     write: `${basePrompt}
@@ -97,7 +93,7 @@ function buildSystemPrompt(context: string, chapterContent?: string, allChapters
 export async function POST(request: NextRequest) {
   try {
     const body: ChatRequest = await request.json();
-    const { messages, chapterId, model = 'claude', context = 'brainstorm' } = body;
+    const { messages, chapterId, model = 'mimo', context = 'brainstorm' } = body;
 
     if (!messages || messages.length === 0) {
       return NextResponse.json(
@@ -107,7 +103,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 检查 API key 是否配置
-    const apiKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY;
+    const apiKey = process.env.OPENAI_API_KEY;
     const useMock = !apiKey || apiKey.includes('your_') || process.env.USE_MOCK_API === 'true';
 
     if (useMock) {

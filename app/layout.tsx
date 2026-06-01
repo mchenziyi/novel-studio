@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/sidebar";
-import { KeyboardShortcuts } from "@/components/ui/keyboard-shortcuts";
-import { ToastContainer } from "@/components/ui/toast";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -16,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Novel Studio - 小说写作 Agent 平台",
-  description: "集成 novel-pro 的 agent 架构，支持多模型调用，提供完整的可视化功能",
+  title: "Novel Studio",
+  description: "AI 驱动的小说写作平台",
 };
 
 export default function RootLayout({
@@ -33,12 +31,10 @@ export default function RootLayout({
       <body className="min-h-full">
         <div className="flex h-screen">
           <Sidebar />
-          <main className="flex-1 overflow-auto bg-gray-50">
+          <main className="flex-1 overflow-auto bg-[#fafafa]">
             {children}
           </main>
         </div>
-        <KeyboardShortcuts />
-        <ToastContainer />
       </body>
     </html>
   );

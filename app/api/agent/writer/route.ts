@@ -5,7 +5,7 @@ import { ModelType } from '@/lib/models';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { chapterId, intent, context, model = 'deepseek' } = body;
+    const { chapterId, intent, context, model = 'mimo' } = body;
 
     if (!chapterId || !intent || !context) {
       return NextResponse.json(

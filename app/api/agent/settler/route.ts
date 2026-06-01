@@ -5,7 +5,7 @@ import { ModelType } from '@/lib/models';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { chapterId, observations, model = 'claude' } = body;
+    const { chapterId, observations, model = 'mimo' } = body;
 
     if (!chapterId || !observations) {
       return NextResponse.json(

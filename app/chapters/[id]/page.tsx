@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Chapter, ChapterVersion } from '@/types';
 import { diffLines } from 'diff';
+import { AiEditSidebar } from '@/components/chapters/ai-edit-sidebar';
 
 export default function ChapterEditPage() {
   const params = useParams();
@@ -27,6 +28,11 @@ export default function ChapterEditPage() {
   const [charCount, setCharCount] = useState(0);
   const [showPreview, setShowPreview] = useState(false);
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // AI 编辑相关状态
+  const [selectedText, setSelectedText] = useState('');
+  const [showAiSidebar, setShowAiSidebar] = useState(true);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     loadChapter();
@@ -74,6 +80,59 @@ export default function ChapterEditPage() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [content, originalContent]);
+
+  // 处理文本选择
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+
+      // 只在 textarea 获得焦点时处理
+      if (document.activeElement !== textarea) {
+        return;
+      }
+
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const selected = content.substring(start, end);
+
+      if (selected.length > 0) {
+        setSelectedText(selected);
+      } else {
+        setSelectedText('');
+      }
+    };
+
+    // 监听 selectionchange 事件
+    document.addEventListener('selectionchange', handleSelectionChange);
+
+    // 也监听 mouseup 作为备用
+    const handleMouseUp = () => {
+      setTimeout(handleSelectionChange, 10);
+    };
+
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+      if (textarea) {
+        textarea.removeEventListener('mouseup', handleMouseUp);
+      }
+    };
+  }, [content]);
+
+  // 应用 AI 编辑结果
+  const handleApplyAiEdit = (original: string, modified: string) => {
+    // 在内容中查找原文并替换
+    const index = content.indexOf(original);
+    if (index !== -1) {
+      const newContent = content.substring(0, index) + modified + content.substring(index + original.length);
+      setContent(newContent);
+    }
+  };
 
   const loadChapter = async () => {
     try {
@@ -347,6 +406,7 @@ export default function ChapterEditPage() {
             </div>
           ) : (
             <textarea
+              ref={textareaRef}
               value={content}
               onChange={(e) => setContent(e.target.value)}
               className="flex-1 p-8 font-mono text-base leading-relaxed resize-none focus:outline-none bg-white"
@@ -488,6 +548,16 @@ export default function ChapterEditPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* AI 编辑侧边栏 */}
+      {showAiSidebar && (
+        <AiEditSidebar
+          selectedText={selectedText}
+          fullContent={content}
+          onApply={handleApplyAiEdit}
+          chapterId={chapterId}
+        />
       )}
     </div>
   );
