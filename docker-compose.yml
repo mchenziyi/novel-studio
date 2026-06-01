@@ -1,0 +1,20 @@
+version: '3'
+
+services:
+  novel-studio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: novel-studio
+    ports:
+      - "3000:3000"
+    volumes:
+      # 挂载小说项目目录
+      - ${NOVEL_PROJECT_PATH:-./novel-data}:/app/novel-data
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - NOVEL_PROJECT_PATH=/app/novel-data
+      - USE_MOCK_API=${USE_MOCK_API:-false}
+    restart: unless-stopped

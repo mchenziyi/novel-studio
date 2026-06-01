@@ -4,7 +4,7 @@
 
 ## 项目简介
 
-Novel Studio 是为了解决 CLI + 编辑器写作方式的不便而创建的 Web 写作平台。当前支持项目《开局屠村现场-他们说我疯了》（74 章，736 条事实）。
+Novel Studio 是为了解决 CLI + 编辑器写作方式的不便而创建的 Web 写作平台，支持任意网络小说项目的创作管理。
 
 ### 核心特性
 
@@ -78,6 +78,29 @@ npm run dev
 # 生产构建
 npm run build
 npm start
+```
+
+访问 http://localhost:3000
+
+### Docker 运行
+
+```bash
+# 构建 Docker 镜像
+docker build -t novel-studio .
+
+# 运行容器
+docker run -d \
+  --name novel-studio \
+  -p 3000:3000 \
+  -v /path/to/your/novel/project:/app/novel-data \
+  -e ANTHROPIC_API_KEY=your_claude_api_key \
+  -e OPENAI_API_KEY=your_openai_api_key \
+  -e DEEPSEEK_API_KEY=your_deepseek_api_key \
+  -e NOVEL_PROJECT_PATH=/app/novel-data \
+  novel-studio
+
+# 使用 Docker Compose
+docker-compose up -d
 ```
 
 访问 http://localhost:3000
