@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
     const query = searchParams.get('q')?.trim();
     const type = searchParams.get('type') || 'all'; // all, chapter, character, foreshadowing
     const limit = parseInt(searchParams.get('limit') || '20');
+    const novelId = searchParams.get('novelId') || undefined;
 
     if (!query || query.length < 2) {
       return NextResponse.json({
@@ -35,7 +36,7 @@ export async function GET(request: NextRequest) {
     // 搜索章节
     if (type === 'all' || type === 'chapter') {
       try {
-        const chapters = await getChapters();
+        const chapters = await getChapters(novelId);
         for (const chapter of chapters) {
           const matches = findMatches(chapter.content, query, chapter.title);
           if (matches.length > 0) {
@@ -57,7 +58,7 @@ export async function GET(request: NextRequest) {
     // 搜索角色
     if (type === 'all' || type === 'character') {
       try {
-        const characters = await getCharacters();
+        const characters = await getCharacters(novelId);
         for (const char of characters) {
           const nameMatches = findMatches(char.name, query, char.name);
           const descMatches = findMatches(char.description, query, char.name);

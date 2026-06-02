@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { Outline, Volume, OutlineChapter } from '@/types';
+import { useNovel } from '@/lib/novel-context';
 
 export default function OutlinePage() {
+  const { currentNovelId } = useNovel();
   const [outline, setOutline] = useState<Outline | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedVolume, setSelectedVolume] = useState<Volume | null>(null);
@@ -11,11 +13,11 @@ export default function OutlinePage() {
 
   useEffect(() => {
     loadOutline();
-  }, []);
+  }, [currentNovelId]);
 
   const loadOutline = async () => {
     try {
-      const response = await fetch('/api/outline');
+      const response = await fetch(`/api/outline?novelId=${currentNovelId}`);
       const data = await response.json();
       setOutline(data);
       if (data.volumes.length > 0) {

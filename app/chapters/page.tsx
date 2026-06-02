@@ -2,27 +2,73 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Chapter } from '@/types';
+import { useNovel } from '@/lib/novel-context';
 
 export default function ChaptersPage() {
+  const { currentNovelId } = useNovel();
+  const router = useRouter();
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [newChapterTitle, setNewChapterTitle] = useState('');
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     loadChapters();
-  }, []);
+  }, [currentNovelId]);
 
   const loadChapters = async () => {
     try {
-      const response = await fetch('/api/chapters');
+      const response = await fetch(`/api/chapters?novelId=${currentNovelId}`);
       const data = await response.json();
       setChapters(data);
     } catch (error) {
       console.error('Failed to load chapters:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 计算下一章编号
+  const getNextChapterId = () => {
+    if (chapters.length === 0) return '0001';
+    const maxId = chapters.reduce((max, ch) => {
+      const num = parseInt(ch.id);
+      return num > max ? num : max;
+    }, 0);
+    return String(maxId + 1).padStart(4, '0');
+  };
+
+  // 创建新章节
+  const handleCreateChapter = async () => {
+    if (!newChapterTitle.trim()) return;
+
+    setCreating(true);
+    try {
+      const response = await fetch('/api/chapters/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newChapterTitle,
+          novelId: currentNovelId,
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success && data.chapter) {
+        setShowCreateDialog(false);
+        setNewChapterTitle('');
+        // 跳转到新章节编辑页
+        router.push(`/chapters/${data.chapter.id}`);
+      }
+    } catch (error) {
+      console.error('Failed to create chapter:', error);
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -49,11 +95,22 @@ export default function ChaptersPage() {
     <div className="min-h-full bg-[#fafafa]">
       <div className="max-w-6xl mx-auto px-8 py-12">
         {/* 页面标题 */}
-        <div className="mb-8">
-          <h1 className="text-[32px] font-semibold text-[#171717] tracking-tight">章节</h1>
-          <p className="text-[15px] text-[#737373] mt-1">
-            共 {chapters.length} 章
-          </p>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <h1 className="text-[32px] font-semibold text-[#171717] tracking-tight">章节</h1>
+            <p className="text-[15px] text-[#737373] mt-1">
+              共 {chapters.length} 章
+            </p>
+          </div>
+          <button
+            onClick={() => setShowCreateDialog(true)}
+            className="flex items-center gap-2 px-5 py-2.5 bg-[#171717] text-white rounded-xl text-[14px] font-medium hover:bg-[#404040] transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            写下一章
+          </button>
         </div>
 
         {/* 搜索和排序 */}
@@ -151,6 +208,54 @@ export default function ChaptersPage() {
           </div>
         )}
       </div>
+
+      {/* 创建章节对话框 */}
+      {showCreateDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl w-96 p-6">
+            <h3 className="text-lg font-semibold mb-2">写下一章</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              将创建第 {getNextChapterId()} 章
+            </p>
+            
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                章节标题 *
+              </label>
+              <input
+                type="text"
+                value={newChapterTitle}
+                onChange={(e) => setNewChapterTitle(e.target.value)}
+                placeholder="请输入章节标题"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCreateChapter();
+                }}
+              />
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowCreateDialog(false);
+                  setNewChapterTitle('');
+                }}
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleCreateChapter}
+                disabled={!newChapterTitle.trim() || creating}
+                className="px-4 py-2 text-sm bg-[#171717] text-white rounded-lg hover:bg-[#404040] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {creating ? '创建中...' : '创建并编辑'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

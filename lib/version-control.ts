@@ -1,10 +1,7 @@
-import fs from 'fs/promises';
-import path from 'path';
 import { diffLines } from 'diff';
 import { ChapterVersion } from '@/types';
-
-const PROJECT_ROOT = process.env.NOVEL_PROJECT_PATH || '/Users/czy/Downloads/books/开局屠村现场-他们说我疯了';
-const HISTORY_DIR = path.join(PROJECT_ROOT, 'chapters/.history');
+import { getDatabase } from './database';
+import { getChapter, updateChapter } from './file-system';
 
 // 创建新版本
 export async function createVersion(
@@ -16,64 +13,60 @@ export async function createVersion(
     description?: string;
   }
 ): Promise<ChapterVersion> {
+  const db = getDatabase();
   const versionId = Date.now().toString();
-  const version: ChapterVersion = {
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO chapter_versions (id, chapter_id, content, timestamp, source, agent_name, description, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(versionId, chapterId, content, now, source, options?.agentName || null, options?.description || null, now);
+
+  return {
     id: versionId,
     chapterId,
     content,
-    timestamp: new Date(),
+    timestamp: new Date(now),
     source,
     agentName: options?.agentName,
     description: options?.description,
   };
-
-  // 确保目录存在
-  const chapterHistoryDir = path.join(HISTORY_DIR, chapterId);
-  await fs.mkdir(chapterHistoryDir, { recursive: true });
-
-  // 保存版本
-  const filePath = path.join(chapterHistoryDir, `${versionId}.json`);
-  await fs.writeFile(filePath, JSON.stringify(version, null, 2), 'utf-8');
-
-  return version;
 }
 
 // 获取章节版本历史
 export async function getVersionHistory(chapterId: string): Promise<ChapterVersion[]> {
-  const chapterHistoryDir = path.join(HISTORY_DIR, chapterId);
+  const db = getDatabase();
+  const rows = db.prepare('SELECT * FROM chapter_versions WHERE chapter_id = ? ORDER BY timestamp DESC').all(chapterId) as any[];
 
-  try {
-    const files = await fs.readdir(chapterHistoryDir);
-    const versions: ChapterVersion[] = [];
-
-    for (const file of files) {
-      if (file.endsWith('.json')) {
-        const content = await fs.readFile(path.join(chapterHistoryDir, file), 'utf-8');
-        const version = JSON.parse(content);
-        version.timestamp = new Date(version.timestamp);
-        versions.push(version);
-      }
-    }
-
-    return versions.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-  } catch (error) {
-    // 如果目录不存在，返回空数组
-    return [];
-  }
+  return rows.map(row => ({
+    id: row.id,
+    chapterId: row.chapter_id,
+    content: row.content,
+    timestamp: new Date(row.timestamp),
+    source: row.source,
+    agentName: row.agent_name,
+    description: row.description,
+    gitCommitHash: row.git_commit_hash,
+  }));
 }
 
 // 获取指定版本
 export async function getVersion(chapterId: string, versionId: string): Promise<ChapterVersion | null> {
-  const filePath = path.join(HISTORY_DIR, chapterId, `${versionId}.json`);
+  const db = getDatabase();
+  const row = db.prepare('SELECT * FROM chapter_versions WHERE id = ? AND chapter_id = ?').get(versionId, chapterId) as any;
 
-  try {
-    const content = await fs.readFile(filePath, 'utf-8');
-    const version = JSON.parse(content);
-    version.timestamp = new Date(version.timestamp);
-    return version;
-  } catch (error) {
-    return null;
-  }
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    chapterId: row.chapter_id,
+    content: row.content,
+    timestamp: new Date(row.timestamp),
+    source: row.source,
+    agentName: row.agent_name,
+    description: row.description,
+    gitCommitHash: row.git_commit_hash,
+  };
 }
 
 // 计算两个版本的差异
@@ -140,17 +133,8 @@ export async function rollbackToVersion(
     throw new Error('Version not found');
   }
 
-  // 更新当前章节文件
-  const chaptersDir = path.join(PROJECT_ROOT, 'chapters');
-  const files = await fs.readdir(chaptersDir);
-
-  for (const file of files) {
-    if (file.startsWith(`${chapterId}_`) && file.endsWith('.md')) {
-      const filePath = path.join(chaptersDir, file);
-      await fs.writeFile(filePath, version.content, 'utf-8');
-      break;
-    }
-  }
+  // 更新章节内容
+  await updateChapter(chapterId, version.content);
 
   // 创建回滚版本记录
   await createVersion(chapterId, version.content, 'rollback', {
@@ -160,35 +144,23 @@ export async function rollbackToVersion(
 
 // 清理旧版本（保留最近 50 个版本）
 export async function cleanupOldVersions(chapterId: string, keepCount: number = 50): Promise<void> {
-  const versions = await getVersionHistory(chapterId);
+  const db = getDatabase();
+  const count = (db.prepare('SELECT COUNT(*) as count FROM chapter_versions WHERE chapter_id = ?').get(chapterId) as any).count;
 
-  if (versions.length <= keepCount) {
+  if (count <= keepCount) {
     return;
   }
 
   // 删除多余的版本
-  const versionsToDelete = versions.slice(keepCount);
-  const chapterHistoryDir = path.join(HISTORY_DIR, chapterId);
-
-  for (const version of versionsToDelete) {
-    const filePath = path.join(chapterHistoryDir, `${version.id}.json`);
-    await fs.unlink(filePath);
-  }
-}
-
-// 获取当前章节内容
-export async function getCurrentChapterContent(chapterId: string): Promise<string | null> {
-  const chaptersDir = path.join(PROJECT_ROOT, 'chapters');
-  const files = await fs.readdir(chaptersDir);
-
-  for (const file of files) {
-    if (file.startsWith(`${chapterId}_`) && file.endsWith('.md')) {
-      const filePath = path.join(chaptersDir, file);
-      return await fs.readFile(filePath, 'utf-8');
-    }
-  }
-
-  return null;
+  db.prepare(`
+    DELETE FROM chapter_versions
+    WHERE chapter_id = ? AND id NOT IN (
+      SELECT id FROM chapter_versions
+      WHERE chapter_id = ?
+      ORDER BY timestamp DESC
+      LIMIT ?
+    )
+  `).run(chapterId, chapterId, keepCount);
 }
 
 // 保存章节内容并创建版本
@@ -201,17 +173,8 @@ export async function saveChapterWithVersion(
     description?: string;
   }
 ): Promise<ChapterVersion> {
-  // 更新章节文件
-  const chaptersDir = path.join(PROJECT_ROOT, 'chapters');
-  const files = await fs.readdir(chaptersDir);
-
-  for (const file of files) {
-    if (file.startsWith(`${chapterId}_`) && file.endsWith('.md')) {
-      const filePath = path.join(chaptersDir, file);
-      await fs.writeFile(filePath, content, 'utf-8');
-      break;
-    }
-  }
+  // 更新章节内容
+  await updateChapter(chapterId, content);
 
   // 创建版本记录
   return await createVersion(chapterId, content, source, options);

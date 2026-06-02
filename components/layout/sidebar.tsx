@@ -3,6 +3,7 @@
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { NovelSelector } from '@/components/ui/novel-selector';
 
 interface SidebarProps {
   className?: string;
@@ -19,8 +20,6 @@ export function Sidebar({ className }: SidebarProps) {
     { href: '/foreshadowing', label: '伏笔', icon: ForeshadowIcon },
     { href: '/search', label: '搜索', icon: SearchIcon },
     { href: '/stats', label: '统计', icon: StatsIcon },
-    { href: '/agent', label: 'Agent', icon: AgentIcon },
-    { href: '/agent/chat', label: '对话', icon: ChatIcon },
   ];
 
   const bottomItems = [
@@ -56,6 +55,11 @@ export function Sidebar({ className }: SidebarProps) {
           </div>
           <span className="text-[15px] font-semibold tracking-tight">Novel Studio</span>
         </Link>
+      </div>
+
+      {/* 小说选择器 */}
+      <div className="px-3 py-3 border-b border-[#e8e8e8]">
+        <NovelSelector />
       </div>
 
       {/* 主导航 */}

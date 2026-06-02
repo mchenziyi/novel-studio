@@ -3,7 +3,10 @@ import { getChapters } from '@/lib/file-system';
 
 export async function GET(request: NextRequest) {
   try {
-    const chapters = await getChapters();
+    const { searchParams } = new URL(request.url);
+    const novelId = searchParams.get('novelId') || 'default';
+    
+    const chapters = await getChapters(novelId);
     return NextResponse.json(chapters);
   } catch (error) {
     console.error('Failed to fetch chapters:', error);

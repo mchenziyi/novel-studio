@@ -1,100 +1,158 @@
-import fs from 'fs/promises';
-import path from 'path';
 import { ModelConfig, ModelProvider, ModelTestResult, MODEL_PRESETS } from '@/types/model';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
-
-const CONFIG_DIR = path.join(process.cwd(), '.config');
-const MODELS_FILE = path.join(CONFIG_DIR, 'models.json');
-
-// 确保配置目录存在
-async function ensureConfigDir() {
-  try {
-    await fs.mkdir(CONFIG_DIR, { recursive: true });
-  } catch (error) {
-    // 目录已存在
-  }
-}
+import { getDatabase } from './database';
 
 // 读取模型配置
 export async function getModelConfigs(): Promise<ModelConfig[]> {
-  try {
-    await ensureConfigDir();
-    const data = await fs.readFile(MODELS_FILE, 'utf-8');
-    return JSON.parse(data);
-  } catch (error) {
-    // 返回默认配置
+  const db = getDatabase();
+  const rows = db.prepare('SELECT * FROM model_configs ORDER BY is_default DESC, name').all() as any[];
+
+  if (rows.length === 0) {
     return getDefaultModelConfigs();
   }
+
+  return rows.map(row => ({
+    id: row.id,
+    name: row.name,
+    provider: row.provider,
+    enabled: Boolean(row.enabled),
+    isDefault: Boolean(row.is_default),
+    settings: JSON.parse(row.settings),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
 }
 
 // 保存模型配置
 export async function saveModelConfigs(configs: ModelConfig[]): Promise<void> {
-  await ensureConfigDir();
-  await fs.writeFile(MODELS_FILE, JSON.stringify(configs, null, 2), 'utf-8');
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  db.prepare('DELETE FROM model_configs').run();
+
+  const insert = db.prepare(`
+    INSERT INTO model_configs (id, name, provider, enabled, is_default, settings, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  for (const config of configs) {
+    insert.run(
+      config.id,
+      config.name,
+      config.provider,
+      config.enabled ? 1 : 0,
+      config.isDefault ? 1 : 0,
+      JSON.stringify(config.settings),
+      config.createdAt || now,
+      now
+    );
+  }
 }
 
 // 获取单个模型配置
 export async function getModelConfig(id: string): Promise<ModelConfig | null> {
-  const configs = await getModelConfigs();
-  return configs.find(c => c.id === id) || null;
+  const db = getDatabase();
+  const row = db.prepare('SELECT * FROM model_configs WHERE id = ?').get(id) as any;
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    name: row.name,
+    provider: row.provider,
+    enabled: Boolean(row.enabled),
+    isDefault: Boolean(row.is_default),
+    settings: JSON.parse(row.settings),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 // 添加模型配置
 export async function addModelConfig(config: Omit<ModelConfig, 'id' | 'createdAt' | 'updatedAt'>): Promise<ModelConfig> {
-  const configs = await getModelConfigs();
-  const newConfig: ModelConfig = {
-    ...config,
-    id: `model_${Date.now()}`,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const id = `model_${Date.now()}`;
 
   // 如果设置为默认，取消其他默认
-  if (newConfig.isDefault) {
-    configs.forEach(c => c.isDefault = false);
+  if (config.isDefault) {
+    db.prepare('UPDATE model_configs SET is_default = 0').run();
   }
 
-  configs.push(newConfig);
-  await saveModelConfigs(configs);
-  return newConfig;
+  db.prepare(`
+    INSERT INTO model_configs (id, name, provider, enabled, is_default, settings, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    config.name,
+    config.provider,
+    config.enabled ? 1 : 0,
+    config.isDefault ? 1 : 0,
+    JSON.stringify(config.settings),
+    now,
+    now
+  );
+
+  return {
+    ...config,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 // 更新模型配置
 export async function updateModelConfig(id: string, updates: Partial<ModelConfig>): Promise<ModelConfig | null> {
-  const configs = await getModelConfigs();
-  const index = configs.findIndex(c => c.id === id);
+  const db = getDatabase();
+  const now = new Date().toISOString();
 
-  if (index === -1) return null;
+  const existing = db.prepare('SELECT * FROM model_configs WHERE id = ?').get(id) as any;
+  if (!existing) return null;
 
   const updatedConfig = {
-    ...configs[index],
-    ...updates,
-    id, // 确保 ID 不变
-    updatedAt: new Date().toISOString(),
+    ...JSON.parse(existing.settings),
+    ...updates.settings,
   };
 
   // 如果设置为默认，取消其他默认
-  if (updatedConfig.isDefault) {
-    configs.forEach(c => c.isDefault = false);
+  if (updates.isDefault) {
+    db.prepare('UPDATE model_configs SET is_default = 0').run();
   }
 
-  configs[index] = updatedConfig;
-  await saveModelConfigs(configs);
-  return updatedConfig;
+  db.prepare(`
+    UPDATE model_configs
+    SET name = ?, provider = ?, enabled = ?, is_default = ?, settings = ?, updated_at = ?
+    WHERE id = ?
+  `).run(
+    updates.name || existing.name,
+    updates.provider || existing.provider,
+    updates.enabled !== undefined ? (updates.enabled ? 1 : 0) : existing.enabled,
+    updates.isDefault !== undefined ? (updates.isDefault ? 1 : 0) : existing.is_default,
+    JSON.stringify(updatedConfig),
+    now,
+    id
+  );
+
+  return {
+    id,
+    name: updates.name || existing.name,
+    provider: updates.provider || existing.provider,
+    enabled: updates.enabled !== undefined ? updates.enabled : Boolean(existing.enabled),
+    isDefault: updates.isDefault !== undefined ? updates.isDefault : Boolean(existing.is_default),
+    settings: updatedConfig,
+    createdAt: existing.created_at,
+    updatedAt: now,
+  };
 }
 
 // 删除模型配置
 export async function deleteModelConfig(id: string): Promise<boolean> {
-  const configs = await getModelConfigs();
-  const filtered = configs.filter(c => c.id !== id);
-
-  if (filtered.length === configs.length) return false;
-
-  await saveModelConfigs(filtered);
-  return true;
+  const db = getDatabase();
+  const result = db.prepare('DELETE FROM model_configs WHERE id = ?').run(id);
+  return result.changes > 0;
 }
 
 // 测试模型连接
@@ -238,6 +296,38 @@ function getDefaultModelConfigs(): ModelConfig[] {
 
 // 获取默认模型
 export async function getDefaultModel(): Promise<ModelConfig | null> {
-  const configs = await getModelConfigs();
-  return configs.find(c => c.isDefault && c.enabled) || configs.find(c => c.enabled) || null;
+  const db = getDatabase();
+  const row = db.prepare('SELECT * FROM model_configs WHERE is_default = 1 AND enabled = 1').get() as any;
+
+  if (row) {
+    return {
+      id: row.id,
+      name: row.name,
+      provider: row.provider,
+      enabled: Boolean(row.enabled),
+      isDefault: Boolean(row.is_default),
+      settings: JSON.parse(row.settings),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  // 如果没有默认模型，返回第一个启用的模型
+  const enabledRow = db.prepare('SELECT * FROM model_configs WHERE enabled = 1 LIMIT 1').get() as any;
+  if (enabledRow) {
+    return {
+      id: enabledRow.id,
+      name: enabledRow.name,
+      provider: enabledRow.provider,
+      enabled: Boolean(enabledRow.enabled),
+      isDefault: Boolean(enabledRow.is_default),
+      settings: JSON.parse(enabledRow.settings),
+      createdAt: enabledRow.created_at,
+      updatedAt: enabledRow.updated_at,
+    };
+  }
+
+  // 如果数据库为空，返回默认配置
+  const defaults = getDefaultModelConfigs();
+  return defaults[0] || null;
 }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { AgentType, Workflow } from '@/types';
+import { useNovel } from '@/lib/novel-context';
 
 interface Agent {
   id: AgentType;
@@ -12,13 +13,22 @@ interface Agent {
 }
 
 export default function AgentPage() {
+  const { currentNovelId } = useNovel();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState<AgentType | null>(null);
-  const [chapterId, setChapterId] = useState<number>(75);
+  const [chapterId, setChapterId] = useState<number | undefined>(undefined);
   const [running, setRunning] = useState(false);
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [result, setResult] = useState<any>(null);
+
+  // 切换小说时重置状态
+  useEffect(() => {
+    setChapterId(undefined);
+    setSelectedAgent(null);
+    setWorkflow(null);
+    setResult(null);
+  }, [currentNovelId]);
 
   useEffect(() => {
     loadAgents();

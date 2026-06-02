@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { diffLines, Change } from 'diff';
+import { useNovel } from '@/lib/novel-context';
 
 interface Message {
   id: string;
@@ -12,6 +13,23 @@ interface Message {
     oldContent: string;
     newContent: string;
   };
+  isStreaming?: boolean;
+  toolCalls?: Array<{
+    toolCallId: string;
+    toolName: string;
+    args: any;
+    result?: any;
+  }>;
+}
+
+interface Session {
+  id: string;
+  title: string;
+  chapter_id?: string;
+  context: string;
+  model?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 type ContextType = 'write' | 'edit' | 'brainstorm' | 'analyze';
@@ -24,10 +42,12 @@ interface ModelOption {
 }
 
 export default function ChatAgentPage() {
+  const { currentNovelId } = useNovel();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [chapterId, setChapterId] = useState<number>(75);
+  const [chapterId, setChapterId] = useState<number | undefined>(undefined);
+  const [chaptersList, setChaptersList] = useState<Array<{id: string, title: string}>>([]);
   const [contextType, setContextType] = useState<ContextType>('brainstorm');
   const [model, setModel] = useState<string>('');
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -36,6 +56,12 @@ export default function ChatAgentPage() {
   const [originalContent, setOriginalContent] = useState('');
   const [editedContent, setEditedContent] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // 会话相关状态
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [showSessions, setShowSessions] = useState(true);
+  const [selectedSessions, setSelectedSessions] = useState<Record<string, boolean>>({});
 
   // 章节预览相关状态
   const [chapterContent, setChapterContent] = useState<string>('');
@@ -81,14 +107,39 @@ export default function ChatAgentPage() {
     loadModels();
   }, []);
 
+  // 加载会话列表
+  useEffect(() => {
+    loadSessions();
+  }, [currentNovelId]);
+
+  // 加载章节列表
+  useEffect(() => {
+    const loadChaptersList = async () => {
+      try {
+        const response = await fetch(`/api/chapters?novelId=${currentNovelId}`);
+        const data = await response.json();
+        // 倒序排列，最新章节在最上面
+        setChaptersList(data.reverse().map((ch: any) => ({ id: ch.id, title: ch.title })));
+      } catch (error) {
+        console.error('Failed to load chapters:', error);
+      }
+    };
+    loadChaptersList();
+  }, [currentNovelId]);
+
   // 加载章节内容
   useEffect(() => {
     const loadChapter = async () => {
-      if (!chapterId) return;
+      if (!chapterId) {
+        setChapterContent('');
+        setChapterTitle('');
+        return;
+      }
 
       setLoadingChapter(true);
       try {
-        const response = await fetch(`/api/chapters/${chapterId}`);
+        const paddedId = String(chapterId).padStart(4, '0');
+        const response = await fetch(`/api/chapters/${paddedId}`);
         const data = await response.json();
         setChapterContent(data.content || '');
         setChapterTitle(data.title || '');
@@ -115,6 +166,123 @@ export default function ChatAgentPage() {
       setCurrentDiff(diffResult);
     }
   }, [originalContent, editedContent]);
+
+  // 加载会话列表
+  const loadSessions = async () => {
+    try {
+      const response = await fetch(`/api/agent/chat?novelId=${currentNovelId}`);
+      const data = await response.json();
+      if (data.sessions) {
+        setSessions(data.sessions);
+      }
+    } catch (error) {
+      console.error('Failed to load sessions:', error);
+    }
+  };
+
+  // 加载会话消息
+  const loadSessionMessages = async (sessionId: string) => {
+    try {
+      const response = await fetch(`/api/agent/chat?sessionId=${sessionId}`);
+      const data = await response.json();
+      if (data.messages) {
+        const formattedMessages: Message[] = data.messages.map((m: any) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: new Date(m.created_at),
+        }));
+        setMessages(formattedMessages);
+      }
+      if (data.session) {
+        setContextType(data.session.context as ContextType);
+        if (data.session.chapter_id) {
+          setChapterId(parseInt(data.session.chapter_id));
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load session messages:', error);
+    }
+  };
+
+  // 创建新会话
+  const handleNewSession = () => {
+    setCurrentSessionId(null);
+    setMessages([]);
+  };
+
+  // 切换会话
+  const handleSwitchSession = (sessionId: string) => {
+    setCurrentSessionId(sessionId);
+    loadSessionMessages(sessionId);
+  };
+
+  // 删除会话（软删除）
+  const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('确定要删除这个会话吗？')) return;
+
+    try {
+      const response = await fetch(`/api/agent/chat?sessionId=${sessionId}`, {
+        method: 'DELETE',
+      });
+      
+      if (response.ok) {
+        setSessions(prev => prev.filter(s => s.id !== sessionId));
+        if (currentSessionId === sessionId) {
+          setCurrentSessionId(null);
+          setMessages([]);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to delete session:', error);
+    }
+  };
+
+  // 批量删除会话
+  const handleBatchDelete = async () => {
+    const selectedIds = Object.keys(selectedSessions).filter(id => selectedSessions[id]);
+    if (selectedIds.length === 0) return;
+    if (!confirm(`确定要删除选中的 ${selectedIds.length} 个会话吗？`)) return;
+
+    try {
+      const response = await fetch(`/api/agent/chat?batchIds=${selectedIds.join(',')}`, {
+        method: 'DELETE',
+      });
+      
+      if (response.ok) {
+        setSessions(prev => prev.filter(s => !selectedIds.includes(s.id)));
+        setSelectedSessions({});
+        if (currentSessionId && selectedIds.includes(currentSessionId)) {
+          setCurrentSessionId(null);
+          setMessages([]);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to batch delete sessions:', error);
+    }
+  };
+
+  // 切换选中状态
+  const toggleSessionSelect = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedSessions(prev => ({
+      ...prev,
+      [sessionId]: !prev[sessionId],
+    }));
+  };
+
+  // 全选/取消全选
+  const toggleSelectAll = () => {
+    const allSelected = sessions.every(s => selectedSessions[s.id]);
+    if (allSelected) {
+      setSelectedSessions({});
+    } else {
+      const newSelected: Record<string, boolean> = {};
+      sessions.forEach(s => { newSelected[s.id] = true; });
+      setSelectedSessions(newSelected);
+    }
+  };
 
   // 处理文本选择
   const handleTextSelect = () => {
@@ -180,6 +348,8 @@ export default function ChatAgentPage() {
             role: m.role,
             content: m.content,
           })),
+          sessionId: currentSessionId,
+          novelId: currentNovelId,
           chapterId,
           model,
           context: contextType,
@@ -189,24 +359,22 @@ export default function ChatAgentPage() {
       const data = await response.json();
 
       if (data.success) {
+        // 更新当前会话 ID
+        if (data.sessionId && !currentSessionId) {
+          setCurrentSessionId(data.sessionId);
+          loadSessions();
+        }
+
         const assistantMessage: Message = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
           content: data.message,
           timestamp: new Date(),
-          diff: data.diff,
+          toolCalls: data.toolCalls || [],
         };
 
         setMessages(prev => [...prev, assistantMessage]);
-
-        // 如果有 diff，显示它
-        if (data.diff) {
-          setOriginalContent(data.diff.oldContent);
-          setEditedContent(data.diff.newContent);
-          setShowDiff(true);
-        }
       } else {
-        // 错误处理
         const errorMessage: Message = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
@@ -262,12 +430,128 @@ export default function ChatAgentPage() {
     }
   };
 
+  // 格式化时间
+  const formatTime = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return '刚刚';
+    if (diffMins < 60) return `${diffMins}分钟前`;
+    if (diffHours < 24) return `${diffHours}小时前`;
+    if (diffDays < 7) return `${diffDays}天前`;
+    return date.toLocaleDateString();
+  };
+
   return (
     <div className="flex h-full">
-      {/* 左侧：聊天区域 */}
+      {/* 最左侧：会话列表 */}
+      {showSessions && (
+        <div className="w-[240px] border-r border-[#e8e8e8] bg-[#fafafa] flex flex-col">
+          <div className="px-4 py-3 border-b border-[#e8e8e8]">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-[14px] font-medium text-[#171717]">历史会话</h3>
+              <button
+                onClick={handleNewSession}
+                className="p-1.5 text-[#525252] hover:text-[#171717] hover:bg-[#f5f5f5] rounded-lg transition-colors"
+                title="新建会话"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
+            </div>
+            {sessions.length > 0 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={toggleSelectAll}
+                  className="text-[11px] text-[#525252] hover:text-[#171717] transition-colors"
+                >
+                  {sessions.every(s => selectedSessions[s.id]) ? '取消全选' : '全选'}
+                </button>
+                {Object.values(selectedSessions).some(v => v) && (
+                  <button
+                    onClick={handleBatchDelete}
+                    className="text-[11px] text-[#dc2626] hover:text-[#b91c1c] transition-colors"
+                  >
+                    删除选中 ({Object.values(selectedSessions).filter(v => v).length})
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {sessions.length === 0 ? (
+              <div className="p-4 text-center text-[13px] text-[#a3a3a3]">
+                暂无历史会话
+              </div>
+            ) : (
+              sessions.map(session => (
+                <div
+                  key={session.id}
+                  onClick={() => handleSwitchSession(session.id)}
+                  className={`px-3 py-3 cursor-pointer border-b border-[#f0f0f0] hover:bg-white transition-colors group ${
+                    currentSessionId === session.id ? 'bg-white border-l-2 border-l-[#171717]' : ''
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedSessions[session.id] || false}
+                      onClick={(e) => toggleSessionSelect(session.id, e)}
+                      className="mt-1 w-3.5 h-3.5 rounded border-gray-300 text-[#171717] focus:ring-[#171717] cursor-pointer"
+                      readOnly
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] text-[#171717] truncate font-medium">
+                        {session.title}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[11px] text-[#a3a3a3]">
+                          {formatTime(session.updated_at)}
+                        </span>
+                        {session.chapter_id && (
+                          <span className="text-[11px] text-[#a3a3a3]">
+                            · 第{session.chapter_id}章
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => handleDeleteSession(session.id, e)}
+                      className="p-1 text-[#a3a3a3] hover:text-[#dc2626] opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 中间：聊天区域 */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* 配置栏 */}
         <div className="h-14 px-6 flex items-center gap-4 border-b border-[#e8e8e8] bg-white">
+          <button
+            onClick={() => setShowSessions(!showSessions)}
+            className="p-1.5 text-[#525252] hover:text-[#171717] hover:bg-[#f5f5f5] rounded-lg transition-colors"
+            title={showSessions ? '隐藏会话列表' : '显示会话列表'}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
+            </svg>
+          </button>
+
+          <div className="w-px h-5 bg-[#e8e8e8]" />
+
           <div className="flex items-center gap-1.5">
             {contextOptions.map(opt => (
               <button
@@ -302,13 +586,28 @@ export default function ChatAgentPage() {
               <div className="w-px h-5 bg-[#e8e8e8]" />
               <div className="flex items-center gap-2">
                 <span className="text-[12px] text-[#a3a3a3]">章节</span>
-                <input
-                  type="number"
-                  value={chapterId}
-                  onChange={(e) => setChapterId(parseInt(e.target.value))}
-                  className="w-16 px-2 py-1 text-[13px] text-center bg-[#f5f5f5] rounded-lg border-none focus:outline-none focus:ring-1 focus:ring-[#171717]"
-                />
+                <select
+                  value={chapterId || ''}
+                  onChange={(e) => setChapterId(e.target.value ? parseInt(e.target.value) : undefined)}
+                  className="w-32 px-2 py-1 text-[13px] bg-[#f5f5f5] rounded-lg border-none focus:outline-none focus:ring-1 focus:ring-[#171717] cursor-pointer truncate"
+                >
+                  <option value="">选择章节</option>
+                  {chaptersList.map(ch => (
+                    <option key={ch.id} value={parseInt(ch.id)}>
+                      {ch.id} {ch.title}
+                    </option>
+                  ))}
+                </select>
               </div>
+            </>
+          )}
+
+          {currentSessionId && (
+            <>
+              <div className="w-px h-5 bg-[#e8e8e8]" />
+              <span className="text-[11px] text-[#a3a3a3]">
+                会话已保存
+              </span>
             </>
           )}
         </div>
@@ -344,7 +643,37 @@ export default function ChatAgentPage() {
                     : 'bg-white border border-[#e8e8e8]'
                 }`}
               >
-                <div className="text-[14px] whitespace-pre-wrap leading-relaxed">{msg.content}</div>
+                {/* 工具调用展示 */}
+                {msg.toolCalls && msg.toolCalls.length > 0 && (
+                  <div className="mb-3 space-y-2">
+                    {msg.toolCalls.map((tc, idx) => (
+                      <div 
+                        key={tc.toolCallId || idx}
+                        className="flex items-center gap-2 px-3 py-2 bg-[#f5f5f5] rounded-lg text-[12px]"
+                      >
+                        <svg className="w-3.5 h-3.5 text-[#525252] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        <span className="text-[#525252] font-medium">{tc.toolName}</span>
+                        {tc.result ? (
+                          <svg className="w-3.5 h-3.5 text-green-500 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : (
+                          <div className="w-3.5 h-3.5 border-2 border-[#a3a3a3] border-t-transparent rounded-full animate-spin ml-auto" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="text-[14px] whitespace-pre-wrap leading-relaxed">
+                  {msg.content}
+                  {msg.isStreaming && (
+                    <span className="inline-block w-2 h-4 bg-[#171717] ml-0.5 animate-pulse" />
+                  )}
+                </div>
                 {msg.diff && (
                   <button
                     onClick={() => {
@@ -399,17 +728,23 @@ export default function ChatAgentPage() {
                   ? '粘贴需要修改的内容...'
                   : '粘贴需要分析的内容...'
               }
-              className="flex-1 px-4 py-3 bg-[#f5f5f5] border-none rounded-xl text-[14px] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-1 focus:ring-[#171717] resize-none"
-              rows={2}
+              className="flex-1 px-4 py-3 bg-[#f5f5f5] rounded-xl border-none focus:outline-none focus:ring-2 focus:ring-[#171717] text-[14px] placeholder:text-[#a3a3a3] resize-none"
+              rows={3}
             />
             <button
               onClick={handleSend}
               disabled={loading || !input.trim()}
-              className="px-5 py-3 bg-[#171717] text-white text-[14px] font-medium rounded-xl hover:bg-[#404040] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 bg-[#171717] text-white rounded-xl hover:bg-[#404040] transition-colors disabled:opacity-50 disabled:cursor-not-allowed self-end"
             >
-              发送
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+              </svg>
             </button>
           </div>
+          <p className="text-[11px] text-[#a3a3a3] mt-2">
+            Enter 发送，Shift+Enter 换行
+            {currentSessionId && ' · 对话会自动保存'}
+          </p>
         </div>
       </div>
 
@@ -471,7 +806,10 @@ export default function ChatAgentPage() {
           <div className="h-14 px-6 flex items-center justify-between border-b border-[#e8e8e8]">
             <div className="flex items-center gap-2">
               <h3 className="text-[14px] font-medium text-[#171717]">
-                {chapterTitle ? `第${chapterId}章 ${chapterTitle}` : `第${chapterId}章`}
+                {chapterId 
+                  ? (chapterTitle ? `第${chapterId}章 ${chapterTitle}` : `第${chapterId}章`)
+                  : '未关联章节'
+                }
               </h3>
               {loadingChapter && (
                 <div className="w-3.5 h-3.5 border-2 border-[#d4d4d4] border-t-[#171717] rounded-full animate-spin" />

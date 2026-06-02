@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useNovel } from '@/lib/novel-context';
 
 interface SearchResult {
   type: 'chapter' | 'character' | 'foreshadowing';
@@ -18,6 +19,7 @@ interface SearchResult {
 }
 
 function SearchContent() {
+  const { currentNovelId } = useNovel();
   const searchParams = useSearchParams();
   const router = useRouter();
 

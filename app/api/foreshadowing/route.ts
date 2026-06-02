@@ -3,7 +3,10 @@ import { getForeshadowing } from '@/lib/file-system';
 
 export async function GET(request: NextRequest) {
   try {
-    const foreshadowing = await getForeshadowing();
+    const { searchParams } = new URL(request.url);
+    const novelId = searchParams.get('novelId') || undefined;
+    
+    const foreshadowing = await getForeshadowing(novelId);
     return NextResponse.json(foreshadowing);
   } catch (error) {
     console.error('Failed to fetch foreshadowing:', error);

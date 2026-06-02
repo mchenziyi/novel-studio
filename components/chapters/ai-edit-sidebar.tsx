@@ -1,13 +1,24 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { diffChars, diffWords, diffLines } from 'diff';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
+// diff imported dynamically to avoid SSR hydration issues
+
+interface SelectionRange {
+  startLine: number;
+  startCol: number;
+  endLine: number;
+  endCol: number;
+  length: number;
+}
 
 interface AiEditSidebarProps {
   selectedText: string;
+  selectionRange: SelectionRange | null;
   fullContent: string;
   onApply: (original: string, modified: string) => void;
   chapterId: string;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  onClearSelection: () => void;
 }
 
 interface Message {
@@ -26,7 +37,15 @@ interface DiffPart {
   value: string;
 }
 
-export function AiEditSidebar({ selectedText, fullContent, onApply, chapterId }: AiEditSidebarProps) {
+export function AiEditSidebar({
+  selectedText,
+  selectionRange,
+  fullContent,
+  onApply,
+  chapterId,
+  textareaRef,
+  onClearSelection,
+}: AiEditSidebarProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -36,13 +55,13 @@ export function AiEditSidebar({ selectedText, fullContent, onApply, chapterId }:
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // 当选中文本变化时，自动添加到输入框
+  // 当选中范围变化时，更新输入框提示
   useEffect(() => {
-    if (selectedText) {
-      setInput(`请帮我修改这段文字：\n"${selectedText}"`);
-      inputRef.current?.focus();
+    if (selectionRange) {
+      const positionText = formatPosition(selectionRange);
+      setInput(`帮我修改${positionText}的文字\n`);
     }
-  }, [selectedText]);
+  }, [selectionRange]);
 
   // 自动滚动到底部
   useEffect(() => {
@@ -59,7 +78,30 @@ export function AiEditSidebar({ selectedText, fullContent, onApply, chapterId }:
     }
   }, [expandedDiff, diffMode, messages]);
 
-  const computeDiff = (oldText: string, newText: string, mode: 'char' | 'word' | 'line') => {
+  // 自动调整 textarea 高度
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  }, [input]);
+
+  // 格式化位置信息
+  const formatPosition = (range: SelectionRange): string => {
+    if (range.startLine === range.endLine) {
+      return `第${range.startLine}行第${range.startCol}-${range.endCol}字`;
+    }
+    return `第${range.startLine}行第${range.startCol}字到第${range.endLine}行第${range.endCol}字`;
+  };
+
+  // 获取选中文字的简短预览（最多20字）
+  const getTextPreview = (text: string): string => {
+    if (text.length <= 20) return text;
+    return text.substring(0, 20) + '...';
+  };
+
+  const computeDiff = async (oldText: string, newText: string, mode: 'char' | 'word' | 'line') => {
+    const { diffChars, diffWords, diffLines } = await import('diff');
     let diff;
     switch (mode) {
       case 'char':
@@ -90,20 +132,24 @@ export function AiEditSidebar({ selectedText, fullContent, onApply, chapterId }:
 
     setMessages(prev => [...prev, userMessage]);
     setInput('');
+    // 重置 textarea 高度
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+    }
     setLoading(true);
 
     try {
-      // 提取选中的文字（如果有）
-      const selectedMatch = input.match(/请帮我修改这段文字：[\s\S]*?"([\s\S]+?)"/);
-      const textToEdit = selectedMatch ? selectedMatch[1] : selectedText;
-      const instruction = selectedMatch ? input.replace(selectedMatch[0], '').trim() : input;
+      // 提取实际的修改指令（去掉位置描述部分）
+      const instruction = input
+        .replace(/^帮我修改第\d+行.*的文字\s*\n?/m, '')
+        .trim() || '请帮我改进这段文字';
 
       const response = await fetch('/api/ai/edit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          selectedText: textToEdit || fullContent.substring(0, 500),
-          instruction: instruction || '请帮我改进这段文字',
+          selectedText: selectedText || fullContent.substring(0, 500),
+          instruction,
           fullContent,
         }),
       });
@@ -168,10 +214,22 @@ export function AiEditSidebar({ selectedText, fullContent, onApply, chapterId }:
           </svg>
           <span className="text-[13px] font-medium text-[#171717]">AI 编辑助手</span>
         </div>
-        {selectedText && (
-          <span className="text-[11px] text-[#a3a3a3] px-2 py-0.5 bg-[#f5f5f5] rounded">
-            已选中 {selectedText.length} 字
-          </span>
+        {selectionRange && (
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-[#737373] px-2 py-0.5 bg-[#e8e8e8] rounded">
+              {formatPosition(selectionRange)}
+            </span>
+            <span className="text-[11px] text-[#a3a3a3]">
+              {selectionRange.length}字
+            </span>
+            <button
+              onClick={onClearSelection}
+              className="text-[10px] text-[#a3a3a3] hover:text-[#525252] px-1.5 py-0.5 hover:bg-[#e8e8e8] rounded"
+              title="取消选择"
+            >
+              ✕
+            </button>
+          </div>
         )}
       </div>
 
@@ -187,6 +245,16 @@ export function AiEditSidebar({ selectedText, fullContent, onApply, chapterId }:
             <p className="text-[13px] text-[#737373] max-w-[200px]">
               选中文字后输入修改要求，或直接描述你想要的修改
             </p>
+            {selectedText && (
+              <div className="mt-4 p-3 bg-[#f5f5f5] rounded-lg max-w-[280px]">
+                <div className="text-[10px] text-[#a3a3a3] mb-1">
+                  {selectionRange ? formatPosition(selectionRange) : `${selectedText.length}字`}
+                </div>
+                <div className="text-[12px] text-[#525252] break-all">
+                  {getTextPreview(selectedText)}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -311,9 +379,9 @@ export function AiEditSidebar({ selectedText, fullContent, onApply, chapterId }:
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入修改要求..."
-            className="flex-1 px-3 py-2 bg-[#f5f5f5] border-none rounded-lg text-[13px] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-1 focus:ring-[#171717] resize-none"
-            rows={2}
+            placeholder={selectionRange ? `修改${formatPosition(selectionRange)}的文字...` : '输入修改要求...'}
+            className="flex-1 px-3 py-2 bg-[#f5f5f5] border-none rounded-lg text-[13px] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-1 focus:ring-[#171717] resize-none overflow-y-auto"
+            style={{ minHeight: '40px', maxHeight: '160px' }}
           />
           <button
             onClick={handleSend}

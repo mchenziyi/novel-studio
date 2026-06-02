@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useNovel } from '@/lib/novel-context';
 
 interface DashboardStats {
   totalChapters: number;
@@ -15,6 +16,7 @@ interface DashboardStats {
 }
 
 export default function Dashboard() {
+  const { currentNovelId } = useNovel();
   const [stats, setStats] = useState<DashboardStats>({
     totalChapters: 0,
     totalWords: 0,
@@ -29,15 +31,15 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadStats();
-  }, []);
+  }, [currentNovelId]);
 
   const loadStats = async () => {
     try {
       const [chaptersRes, syncRes, foreshadowingRes, charactersRes] = await Promise.all([
-        fetch('/api/chapters'),
-        fetch('/api/files'),
-        fetch('/api/foreshadowing'),
-        fetch('/api/characters'),
+        fetch(`/api/chapters?novelId=${currentNovelId}`),
+        fetch(`/api/files?novelId=${currentNovelId}`),
+        fetch(`/api/foreshadowing?novelId=${currentNovelId}`),
+        fetch(`/api/characters?novelId=${currentNovelId}`),
       ]);
 
       const chapters = await chaptersRes.json();

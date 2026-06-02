@@ -3,8 +3,10 @@
 import { useState, useEffect } from 'react';
 import { Character } from '@/types';
 import { CharacterGraph } from '@/components/visualization/character-graph';
+import { useNovel } from '@/lib/novel-context';
 
 export default function CharactersPage() {
+  const { currentNovelId } = useNovel();
   const [characters, setCharacters] = useState<Character[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -12,11 +14,11 @@ export default function CharactersPage() {
 
   useEffect(() => {
     loadCharacters();
-  }, []);
+  }, [currentNovelId]);
 
   const loadCharacters = async () => {
     try {
-      const response = await fetch('/api/characters');
+      const response = await fetch(`/api/characters?novelId=${currentNovelId}`);
       const data = await response.json();
       setCharacters(data);
     } catch (error) {

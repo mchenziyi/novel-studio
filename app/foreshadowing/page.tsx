@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useNovel } from '@/lib/novel-context';
 
 interface Foreshadowing {
   id: string;
@@ -15,6 +16,7 @@ interface Foreshadowing {
 }
 
 export default function ForeshadowingPage() {
+  const { currentNovelId } = useNovel();
   const [foreshadowing, setForeshadowing] = useState<Foreshadowing[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<'all' | 'planted' | 'progressing' | 'resolved'>('all');
@@ -24,11 +26,11 @@ export default function ForeshadowingPage() {
 
   useEffect(() => {
     loadForeshadowing();
-  }, []);
+  }, [currentNovelId]);
 
   const loadForeshadowing = async () => {
     try {
-      const response = await fetch('/api/foreshadowing');
+      const response = await fetch(`/api/foreshadowing?novelId=${currentNovelId}`);
       const data = await response.json();
       setForeshadowing(data);
     } catch (error) {
@@ -289,7 +291,7 @@ export default function ForeshadowingPage() {
 
                 <p className="text-gray-600 mb-4">{item.description}</p>
 
-                {item.relatedChapters.length > 0 && (
+                {item.relatedChapters && item.relatedChapters.length > 0 && (
                   <div>
                     <span className="text-sm text-gray-500 mr-2">关联章节:</span>
                     <div className="inline-flex flex-wrap gap-2">

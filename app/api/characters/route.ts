@@ -3,7 +3,10 @@ import { getCharacters } from '@/lib/file-system';
 
 export async function GET(request: NextRequest) {
   try {
-    const characters = await getCharacters();
+    const { searchParams } = new URL(request.url);
+    const novelId = searchParams.get('novelId') || undefined;
+    
+    const characters = await getCharacters(novelId);
     return NextResponse.json(characters);
   } catch (error) {
     console.error('Failed to fetch characters:', error);

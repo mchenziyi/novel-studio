@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useNovel } from '@/lib/novel-context';
 
 interface Chapter {
   id: string;
@@ -21,6 +22,7 @@ interface WritingStats {
 }
 
 export default function StatsPage() {
+  const { currentNovelId } = useNovel();
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [stats, setStats] = useState<WritingStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -32,7 +34,7 @@ export default function StatsPage() {
 
   const loadChapters = async () => {
     try {
-      const response = await fetch('/api/chapters');
+      const response = await fetch(`/api/chapters?novelId=${currentNovelId}`);
       const data = await response.json();
       setChapters(data);
       calculateStats(data);
