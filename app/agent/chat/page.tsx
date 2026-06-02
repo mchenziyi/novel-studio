@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { diffLines, Change } from 'diff';
 import { useNovel } from '@/lib/novel-context';
+import { renderMarkdown } from '@/lib/render-markdown';
 
 interface Message {
   id: string;
@@ -333,16 +334,24 @@ export default function ChatAgentPage() {
       timestamp: new Date(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    const assistantMsgId = (Date.now() + 1).toString();
+    const assistantMessage: Message = {
+      id: assistantMsgId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+      isStreaming: true,
+      toolCalls: [],
+    };
+
+    setMessages(prev => [...prev, userMessage, assistantMessage]);
     setInput('');
     setLoading(true);
 
     try {
       const response = await fetch('/api/agent/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [...messages, userMessage].map(m => ({
             role: m.role,
@@ -356,42 +365,61 @@ export default function ChatAgentPage() {
         }),
       });
 
-      const data = await response.json();
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No reader');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalData: any = null;
 
-      if (data.success) {
-        // 更新当前会话 ID
-        if (data.sessionId && !currentSessionId) {
-          setCurrentSessionId(data.sessionId);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === 'chunk') {
+              setMessages(prev => prev.map(m =>
+                m.id === assistantMsgId
+                  ? { ...m, content: m.content + data.text }
+                  : m
+              ));
+            } else if (data.type === 'done') {
+              finalData = data;
+            } else if (data.type === 'error') {
+              console.error('Stream error:', data.error);
+            }
+          } catch {}
+        }
+      }
+
+      if (finalData) {
+        if (finalData.sessionId && !currentSessionId) {
+          setCurrentSessionId(finalData.sessionId);
           loadSessions();
         }
-
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: data.message,
-          timestamp: new Date(),
-          toolCalls: data.toolCalls || [],
-        };
-
-        setMessages(prev => [...prev, assistantMessage]);
+        setMessages(prev => prev.map(m =>
+          m.id === assistantMsgId
+            ? { ...m, content: finalData.message || m.content, isStreaming: false, toolCalls: finalData.toolCalls || [] }
+            : m
+        ));
       } else {
-        const errorMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: `错误：${data.error || '处理消息时出错'}`,
-          timestamp: new Date(),
-        };
-        setMessages(prev => [...prev, errorMessage]);
+        setMessages(prev => prev.map(m =>
+          m.id === assistantMsgId ? { ...m, isStreaming: false } : m
+        ));
       }
     } catch (error) {
       console.error('Chat error:', error);
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: '网络错误，请稍后重试',
-        timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages(prev => prev.map(m =>
+        m.id === assistantMsgId
+          ? { ...m, content: '网络错误，请稍后重试', isStreaming: false }
+          : m
+      ));
     } finally {
       setLoading(false);
     }
@@ -668,12 +696,10 @@ export default function ChatAgentPage() {
                   </div>
                 )}
 
-                <div className="text-[14px] whitespace-pre-wrap leading-relaxed">
-                  {msg.content}
-                  {msg.isStreaming && (
-                    <span className="inline-block w-2 h-4 bg-[#171717] ml-0.5 animate-pulse" />
-                  )}
-                </div>
+                <div
+                  className={`text-[14px] leading-relaxed ${msg.role === 'user' ? 'chat-markdown-light' : 'chat-markdown'}`}
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+                />
                 {msg.diff && (
                   <button
                     onClick={() => {
@@ -695,19 +721,6 @@ export default function ChatAgentPage() {
             </div>
           ))}
 
-          {loading && (
-            <div className="flex justify-start">
-              <div className="bg-white border border-[#e8e8e8] rounded-2xl px-5 py-3.5">
-                <div className="flex items-center gap-2">
-                  <div className="flex gap-1">
-                    <div className="w-1.5 h-1.5 bg-[#a3a3a3] rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <div className="w-1.5 h-1.5 bg-[#a3a3a3] rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <div className="w-1.5 h-1.5 bg-[#a3a3a3] rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
 
           <div ref={messagesEndRef} />
         </div>

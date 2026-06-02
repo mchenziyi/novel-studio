@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Chapter, ChapterVersion } from '@/types';
+import { renderMarkdown } from '@/lib/render-markdown';
 import { useNovel } from '@/lib/novel-context';
 
 interface ChapterEditorProps {
@@ -14,6 +15,7 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  isStreaming?: boolean;
   toolCalls?: Array<{
     toolCallId: string;
     toolName: string;
@@ -35,6 +37,7 @@ export default function ChapterEditor({ chapter: initialChapter }: ChapterEditor
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [charCount, setCharCount] = useState(0);
+  const [isEditing, setIsEditing] = useState(false);
 
   // 版本对比状态
   const [versions, setVersions] = useState<ChapterVersion[]>([]);
@@ -510,7 +513,17 @@ export default function ChapterEditor({ chapter: initialChapter }: ChapterEditor
       timestamp: new Date(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    const assistantMsgId = (Date.now() + 1).toString();
+    const assistantMessage: Message = {
+      id: assistantMsgId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+      isStreaming: true,
+      toolCalls: [],
+    };
+
+    setMessages(prev => [...prev, userMessage, assistantMessage]);
     setAiInput('');
     setAiLoading(true);
 
@@ -531,25 +544,64 @@ export default function ChapterEditor({ chapter: initialChapter }: ChapterEditor
         }),
       });
 
-      const data = await response.json();
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No reader');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalData: any = null;
 
-      if (data.success) {
-        // 更新 sessionId（首次对话时创建）
-        if (data.sessionId && !sessionId) {
-          setSessionId(data.sessionId);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === 'chunk') {
+              setMessages(prev => prev.map(m =>
+                m.id === assistantMsgId
+                  ? { ...m, content: m.content + data.text }
+                  : m
+              ));
+            } else if (data.type === 'done') {
+              finalData = data;
+            } else if (data.type === 'error') {
+              console.error('Stream error:', data.error);
+            }
+          } catch {}
         }
+      }
 
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: data.message,
-          timestamp: new Date(),
-          toolCalls: data.toolCalls || [],
-        };
-        setMessages(prev => [...prev, assistantMessage]);
+      // 流结束，更新最终状态
+      if (finalData) {
+        if (finalData.sessionId && !sessionId) {
+          setSessionId(finalData.sessionId);
+        }
+        setMessages(prev => prev.map(m =>
+          m.id === assistantMsgId
+            ? { ...m, content: finalData.message || m.content, isStreaming: false, toolCalls: finalData.toolCalls || [] }
+            : m
+        ));
+        if (finalData.toolCalls?.includes('saveChapter')) {
+          await refreshChapter();
+        }
+      } else {
+        setMessages(prev => prev.map(m =>
+          m.id === assistantMsgId ? { ...m, isStreaming: false } : m
+        ));
       }
     } catch (error) {
       console.error('AI error:', error);
+      setMessages(prev => prev.map(m =>
+        m.id === assistantMsgId
+          ? { ...m, content: '发送失败，请重试。', isStreaming: false }
+          : m
+      ));
     } finally {
       setAiLoading(false);
     }
@@ -571,6 +623,28 @@ export default function ChapterEditor({ chapter: initialChapter }: ChapterEditor
 
   const handleApplyAiSuggestion = (newContent: string) => {
     setContent(newContent);
+  };
+
+  // 刷新章节内容（AI 保存后调用）
+  const refreshChapter = async () => {
+    try {
+      const res = await fetch(`/api/chapters/${chapterId}?novelId=${currentNovelId}`);
+      const data = await res.json();
+      // API 直接返回章节对象，不是 { chapter: ... }
+      if (data.content) {
+        setContent(data.content);
+        setOriginalContent(data.content);
+        setHasChanges(false);
+      }
+      // 刷新版本历史
+      const historyRes = await fetch(`/api/chapters/${chapterId}/history`);
+      const historyData = await historyRes.json();
+      if (historyData.versions) {
+        setVersions(historyData.versions);
+      }
+    } catch (e) {
+      console.error('Failed to refresh chapter:', e);
+    }
   };
 
   return (
@@ -640,11 +714,11 @@ export default function ChapterEditor({ chapter: initialChapter }: ChapterEditor
                     }`}
                   >
                     {/* 行号 */}
-                    <div className="w-10 text-right pr-2 text-[#a3a3a3] select-none flex-shrink-0 border-r border-[#e5e5e5] leading-[24px]">
+                    <div className="w-10 text-right pr-2 text-[#a3a3a3] select-none flex-shrink-0 border-r border-[#e5e5e5] leading-[24px]" style={{ position: 'sticky', left: 0, background: 'inherit', zIndex: 1 }}>
                       {row.leftLineNum || ''}
                     </div>
                     {/* 符号 */}
-                    <div className="w-5 text-center flex-shrink-0 leading-[24px]">
+                    <div className="w-5 text-center flex-shrink-0 leading-[24px]" style={{ position: 'sticky', left: 40, background: 'inherit', zIndex: 1 }}>
                       {(row.rowType === 'removed' || row.rowType === 'modified') && (
                         <span className="text-[#cf222e]">−</span>
                       )}
@@ -684,18 +758,45 @@ export default function ChapterEditor({ chapter: initialChapter }: ChapterEditor
               <span className="ml-2 text-xs text-blue-400">v{versions.length}</span>
             </div>
             <button
-              onClick={() => textareaRef.current?.focus()}
+              onClick={() => {
+                if (isEditing) {
+                  handleSave();
+                  setIsEditing(false);
+                } else {
+                  setIsEditing(true);
+                }
+              }}
               className="text-xs text-blue-500 hover:text-blue-700 px-2 py-1 rounded hover:bg-blue-100"
             >
-              点击编辑
+              {isEditing ? '保存' : '点击编辑'}
             </button>
+            {isEditing && (
+              <button
+                onClick={() => {
+                  setContent(originalContent);
+                  setIsEditing(false);
+                }}
+                className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100"
+              >
+                取消
+              </button>
+            )}
           </div>
           <div 
             ref={rightPanelRef}
             onScroll={handleRightScroll}
             className="flex-1 overflow-y-scroll overflow-x-auto bg-white font-mono text-[13px] leading-[24px] p-0"
           >
-            {diffRows.length > 0 ? (
+            {isEditing ? (
+              <textarea
+                ref={textareaRef}
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                className="w-full h-full p-4 font-mono text-[13px] leading-[24px] resize-none focus:outline-none bg-white"
+                style={{ minHeight: '100%' }}
+                autoFocus
+              />
+            ) : diffRows.length > 0 ? (
               <div style={{ minWidth: 'max-content' }}>
                 {diffRows.map((row, i) => (
                   <div
@@ -709,11 +810,11 @@ export default function ChapterEditor({ chapter: initialChapter }: ChapterEditor
                     }`}
                   >
                     {/* 行号 */}
-                    <div className="w-10 text-right pr-2 text-[#a3a3a3] select-none flex-shrink-0 border-r border-[#e5e5e5] leading-[24px]">
+                    <div className="w-10 text-right pr-2 text-[#a3a3a3] select-none flex-shrink-0 border-r border-[#e5e5e5] leading-[24px]" style={{ position: 'sticky', left: 0, background: 'inherit', zIndex: 1 }}>
                       {row.rightLineNum || ''}
                     </div>
                     {/* 符号 */}
-                    <div className="w-5 text-center flex-shrink-0 leading-[24px]">
+                    <div className="w-5 text-center flex-shrink-0 leading-[24px]" style={{ position: 'sticky', left: 40, background: 'inherit', zIndex: 1 }}>
                       {(row.rowType === 'added' || row.rowType === 'modified') && (
                         <span className="text-[#1a7f37]">+</span>
                       )}
@@ -732,18 +833,9 @@ export default function ChapterEditor({ chapter: initialChapter }: ChapterEditor
                 ))}
               </div>
             ) : (
-              <div className="p-4">{content}</div>
+              <div className="p-4 font-mono text-[13px] leading-[24px] whitespace-pre-wrap">{content}</div>
             )}
           </div>
-          {/* 隐藏的 textarea 用于编辑 */}
-          <textarea
-            ref={textareaRef}
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            onScroll={handleRightScroll}
-            className="sr-only"
-            tabIndex={-1}
-          />
           {/* 选中文字浮动按钮 */}
           {selectedText && selectionPosition && (
             <button
@@ -811,24 +903,16 @@ export default function ChapterEditor({ chapter: initialChapter }: ChapterEditor
                       ))}
                     </div>
                   )}
-                  <div className="whitespace-pre-wrap">{msg.content}</div>
+                  <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                  {msg.isStreaming && (
+                    <span className="inline-block w-2 h-4 bg-gray-400 ml-0.5 animate-pulse" />
+                  )}
                   <div className={`text-xs mt-1 ${msg.role === 'user' ? 'text-blue-200' : 'text-gray-400'}`}>
                     {msg.timestamp.toLocaleTimeString()}
                   </div>
                 </div>
               </div>
             ))}
-            {aiLoading && (
-              <div className="flex justify-start">
-                <div className="bg-gray-100 rounded-lg px-3 py-2">
-                  <div className="flex gap-1">
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
-                </div>
-              </div>
-            )}
             <div ref={messagesEndRef} />
           </div>
 

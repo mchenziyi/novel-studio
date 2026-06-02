@@ -1,9 +1,5 @@
-import fs from 'fs/promises';
-import path from 'path';
 import { Chapter, Character, Outline } from '@/types';
 import { getDatabase } from './database';
-
-const PROJECT_ROOT = process.env.NOVEL_PROJECT_PATH || '/Users/czy/Downloads/books/开局屠村现场-他们说我疯了';
 
 // 读取章节列表
 export async function getChapters(novelId?: string): Promise<Chapter[]> {
@@ -74,20 +70,6 @@ export async function updateChapter(id: string, content: string, novelId?: strin
     throw new Error(`Chapter ${id} not found`);
   }
 
-  // Also update the file system for backward compatibility
-  try {
-    const chaptersDir = path.join(PROJECT_ROOT, 'chapters');
-    const files = await fs.readdir(chaptersDir);
-    for (const file of files) {
-      if (file.startsWith(`${id}_`) && file.endsWith('.md')) {
-        await fs.writeFile(path.join(chaptersDir, file), content, 'utf-8');
-        break;
-      }
-    }
-  } catch (error) {
-    // File system update is optional
-    console.warn('Failed to update file system:', error);
-  }
 }
 
 // 创建新章节
@@ -99,14 +81,6 @@ export async function createChapter(id: string, title: string, content: string, 
 
   db.prepare('INSERT INTO chapters (id, novel_id, title, content, word_count, file, status, last_modified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(id, novelId, title, content, content.length, file, 'pending', now, now, now);
-
-  // Also create the file
-  try {
-    const chaptersDir = path.join(PROJECT_ROOT, 'chapters');
-    await fs.writeFile(path.join(chaptersDir, file), content, 'utf-8');
-  } catch (error) {
-    console.warn('Failed to create file:', error);
-  }
 
   return { id, title, content, wordCount: content.length, file, status: 'pending', lastModified: new Date(now) };
 }
@@ -182,164 +156,25 @@ export async function getCharacter(id: string): Promise<Character | null> {
 export async function getForeshadowing(novelId?: string): Promise<any[]> {
   const db = getDatabase();
   
-  // 如果指定了 novelId，只从数据库读取
+  let query = 'SELECT * FROM foreshadowing';
+  const params: string[] = [];
+  
   if (novelId) {
-    let query = 'SELECT * FROM foreshadowing WHERE novel_id = ? ORDER BY planted_chapter ASC';
-    const rows = db.prepare(query).all(novelId) as any[];
-    
-    return rows.map(row => ({
-      id: row.id,
-      name: row.name,
-      status: row.status,
-      description: row.description || '',
-      plantedChapter: row.planted_chapter,
-      resolvedChapter: row.resolved_chapter,
-    }));
+    query += ' WHERE novel_id = ?';
+    params.push(novelId);
   }
-
-  // 如果没有指定 novelId，从文件系统读取（兼容旧数据）
-  try {
-    const filePath = path.join(PROJECT_ROOT, '故事/伏笔池.md');
-    const content = await fs.readFile(filePath, 'utf-8');
-    return parseForeshadowing(content);
-  } catch (error) {
-    console.error('Failed to read foreshadowing:', error);
-    return [];
-  }
-}
-
-// 解析伏笔池
-function parseForeshadowing(content: string): any[] {
-  const lines = content.split('\n');
-  const items: any[] = [];
-  let currentSection = '';
-  let headerSkipped = false;
-  let separatorSkipped = false;
-
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-
-    // 检测章节标题
-    if (trimmedLine.startsWith('## ')) {
-      currentSection = trimmedLine.substring(3).trim();
-      headerSkipped = false;
-      separatorSkipped = false;
-      continue;
-    }
-
-    // 跳过表头行
-    if (trimmedLine.startsWith('|') && !headerSkipped && !trimmedLine.includes('---')) {
-      headerSkipped = true;
-      continue;
-    }
-
-    // 跳过分隔行
-    if (trimmedLine.startsWith('|') && trimmedLine.includes('---')) {
-      separatorSkipped = true;
-      continue;
-    }
-
-    // 解析数据行
-    if (trimmedLine.startsWith('|') && headerSkipped && separatorSkipped) {
-      const cells = trimmedLine.split('|').map(c => c.trim()).filter(c => c);
-      if (cells.length < 3) continue;
-
-      const item: any = {
-        id: '',
-        name: '',
-        status: 'planted',
-        plantedChapter: null,
-        resolvedChapter: null,
-        relatedChapters: [],
-        description: '',
-        section: currentSection,
-      };
-
-      if (currentSection.includes('章新增')) {
-        // 67章新增格式: hook_id | 内容 | 状态 | src_fact
-        item.id = cells[0] || `foreshadow-${items.length + 1}`;
-        item.name = cells[1] || '';
-        item.description = cells[1] || '';
-
-        // 状态映射
-        const statusValue = cells[2] || '';
-        const statusMap: Record<string, string> = {
-          'open': 'progressing',
-          'dormant': 'planted',
-          'foreshadowing': 'progressing',
-        };
-        item.status = statusMap[statusValue] || 'planted';
-
-        // 从 hook_id 提取章节号
-        const hookMatch = item.id.match(/hook-(\d+)-/);
-        if (hookMatch) {
-          item.plantedChapter = parseInt(hookMatch[1]);
-        }
-      } else if (currentSection.includes('活跃伏笔')) {
-        // 活跃伏笔格式: hook_id | 类型 | 章节 | 内容摘要 | 状态 | 关联事实
-        item.id = cells[0] || `foreshadow-${items.length + 1}`;
-
-        // 章节号
-        if (cells[2] && /^\d+$/.test(cells[2])) {
-          item.plantedChapter = parseInt(cells[2]);
-        }
-
-        // 内容摘要
-        item.name = cells[3] || '';
-        item.description = cells[3] || '';
-
-        // 状态映射
-        const statusValue = cells[4] || '';
-        if (statusValue.includes('已回收')) {
-          item.status = 'resolved';
-        } else if (statusValue.includes('推进中')) {
-          item.status = 'progressing';
-        } else if (statusValue.includes('待推进')) {
-          item.status = 'planted';
-        } else {
-          item.status = 'planted';
-        }
-
-        // 关联事实
-        if (cells[5]) {
-          const factMatches = cells[5].match(/\d+/g);
-          if (factMatches) {
-            item.relatedChapters = factMatches.map(Number).filter(n => n > 0 && n < 1000);
-          }
-        }
-      } else if (currentSection.includes('推进/回收')) {
-        // 推进/回收记录格式: hook_id | 章节 | 推进内容 | 状态变更
-        item.id = cells[0] || `foreshadow-${items.length + 1}`;
-        item.name = cells[2] || '';
-        item.description = cells[2] || '';
-
-        // 章节号
-        if (cells[1] && /^\d+$/.test(cells[1])) {
-          item.plantedChapter = parseInt(cells[1]);
-        }
-
-        // 从状态变更中提取状态
-        if (cells[3]) {
-          if (cells[3].includes('已回收')) {
-            item.status = 'resolved';
-          } else if (cells[3].includes('推进')) {
-            item.status = 'progressing';
-          }
-        }
-      }
-
-      // 如果没有 name，使用 id
-      if (!item.name && item.id) {
-        item.name = item.id;
-      }
-
-      if (item.id) {
-        items.push(item);
-      }
-    }
-  }
-
-  return items;
+  
+  query += ' ORDER BY planted_chapter ASC';
+  const rows = db.prepare(query).all(...params) as any[];
+  
+  return rows.map(row => ({
+    id: row.id,
+    name: row.name,
+    status: row.status,
+    description: row.description || '',
+    plantedChapter: row.planted_chapter,
+    resolvedChapter: row.resolved_chapter,
+  }));
 }
 
 // 读取大纲
@@ -363,14 +198,7 @@ export async function getOutline(novelId?: string): Promise<Outline> {
     return parseOutline(row.content);
   }
 
-  // Fallback to file system
-  try {
-    const filePath = path.join(PROJECT_ROOT, '00-大纲.md');
-    const content = await fs.readFile(filePath, 'utf-8');
-    return parseOutline(content);
-  } catch (error) {
-    return { title: '', synopsis: '', volumes: [] };
-  }
+  return { title: '', synopsis: '', volumes: [] };
 }
 
 // 解析大纲
@@ -431,64 +259,28 @@ function parseOutline(content: string): Outline {
 
 // 读取同步状态
 export async function getSyncStatus(): Promise<any> {
-  try {
-    const filePath = path.join(PROJECT_ROOT, '故事/同步状态.md');
-    const content = await fs.readFile(filePath, 'utf-8');
-    return parseSyncStatus(content);
-  } catch (error) {
+  const db = getDatabase();
+  const row = db.prepare('SELECT * FROM story_sync WHERE novel_id = ?').get('default') as any;
+
+  if (!row) {
     return {
       mode: '',
-      syncedTo: '',
+      syncedTo: 0,
       totalFacts: 0,
       latestChapter: 0,
-      canContinue: false,
+      canContinue: true,
       pendingChapters: [],
     };
   }
-}
 
-// 解析同步状态
-function parseSyncStatus(content: string): any {
-  const lines = content.split('\n');
-  const status: any = {
+  return {
     mode: '',
-    syncedTo: '',
-    totalFacts: 0,
-    latestChapter: 0,
-    canContinue: false,
+    syncedTo: row.synced_chapter || 0,
+    totalFacts: row.total_facts || 0,
+    latestChapter: row.latest_chapter || 0,
+    canContinue: Boolean(row.can_continue ?? 1),
     pendingChapters: [],
   };
-
-  for (const line of lines) {
-    if (line.startsWith('- 模式：')) {
-      status.mode = line.substring(5).trim();
-    } else if (line.startsWith('- 已同步至：')) {
-      status.syncedTo = line.substring(7).trim();
-      const match = status.syncedTo.match(/第(\d+)章/);
-      if (match) {
-        status.syncedTo = parseInt(match[1]);
-      }
-    } else if (line.startsWith('- 累计')) {
-      const match = line.match(/(\d+) 条事实/);
-      if (match) {
-        status.totalFacts = parseInt(match[1]);
-      }
-    } else if (line.startsWith('- 最新已创作章节：')) {
-      const match = line.match(/第(\d+)章/);
-      if (match) {
-        status.latestChapter = parseInt(match[1]);
-      }
-    } else if (line.startsWith('- 是否允许继续写新章：')) {
-      status.canContinue = line.includes('是');
-    } else if (line.startsWith('- [ ] 第')) {
-      const match = line.match(/第(\d+)章/);
-      if (match) {
-        status.pendingChapters.push(parseInt(match[1]));
-      }
-    }
-  }
-
-  return status;
 }
 
 // 读取模型配置

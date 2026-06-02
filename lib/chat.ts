@@ -70,7 +70,7 @@ export function getChatSessions(chapterId?: string, novelId?: string, includeDel
 
   return db.prepare(`
     SELECT * FROM chat_sessions 
-    WHERE 1=1 ${deletedCondition} ${novelCondition}
+    WHERE chapter_id IS NULL ${deletedCondition} ${novelCondition}
     ORDER BY updated_at DESC
   `).all(...novelParams) as ChatSession[];
 }

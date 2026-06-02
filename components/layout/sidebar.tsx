@@ -20,6 +20,8 @@ export function Sidebar({ className }: SidebarProps) {
     { href: '/foreshadowing', label: '伏笔', icon: ForeshadowIcon },
     { href: '/search', label: '搜索', icon: SearchIcon },
     { href: '/stats', label: '统计', icon: StatsIcon },
+    { href: '/agent', label: 'Agent', icon: AgentIcon },
+    { href: '/agent/chat', label: '对话', icon: ChatIcon },
   ];
 
   const bottomItems = [

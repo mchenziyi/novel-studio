@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { callModelWithTools, ModelType } from '@/lib/models';
+import { callModelWithTools, streamModelWithTools, cleanToolCallArtifacts, ModelType } from '@/lib/models';
 import { getChapter, getChapters } from '@/lib/file-system';
 import { saveChapterWithVersion } from '@/lib/version-control';
 import { createChatAgentTools, getRelevantMemories, formatMemoriesForContext } from '@/lib/chat-tools';
@@ -30,89 +30,25 @@ interface ChatRequest {
 
 // 构建系统提示
 function buildSystemPrompt(context: string, novelId: string): string {
-  const PROJECT_ROOT = process.env.NOVEL_PROJECT_PATH || '/Users/czy/Downloads/books/开局屠村现场-他们说我疯了';
-  
-  const basePrompt = `你是 Novel Studio 的 AI 写作助手，基于 novel-pro 技能系统。
+  const basePrompt = `你是 Novel Studio 的 AI 写作助手。
 
 ## 项目信息
-- 小说项目路径：${PROJECT_ROOT}
 - 当前小说 ID：${novelId}
 
-## 你的能力
-
-### 文件访问（读取小说项目文件）
-- **readFile**: 读取小说项目中的任何文件（章节、故事文件、技能文档等）
-- **listDirectory**: 列出目录内容
-- **searchFiles**: 搜索文件内容
-
-### 数据库查询
-- **getChapter / listChapters / searchChapters**: 章节操作
-- **listCharacters / getCharacter**: 角色查询
-- **listForeshadowing**: 伏笔查询
-- **getOutline**: 大纲
-- **getStats**: 统计
-- **queryDatabase**: SQL 查询
-
-### 故事数据（数据库持久化）
-- **getStoryContext**: 获取完整故事上下文
-- **getFacts / addFact**: 事实总账
-- **getHooks / addHook / updateHook**: 伏笔池
-- **getSync / updateSync**: 同步状态（门禁）
-- **getStoryCharacters / updateStoryCharacter**: 角色矩阵
-- **getSummaries / updateSummary**: 章节摘要
-- **getState / updateState**: 当前状态
-- **getPlotlines / updatePlotline**: 支线进度
-- **getResources / addResource**: 资源账本
-
-### 文本对比
-- **compareTexts**: 对比两段文本差异（支持按行/词/字符）
-
-### 记忆系统
-- **saveMemory**: 保存学到的知识（用户纠正、设定信息等）
-- **searchMemory**: 搜索记忆
-- **listMemories**: 列出记忆
-
-### Git 操作
-- **getGitStatus**: Git 状态
-- **getGitLog**: 提交历史
-- **gitCommit**: 创建提交
-
-## novel-pro 工作流
-
-当用户要"写下一章"时，按以下流程：
-
-### 1. 门禁检查
-- 用 getSync 检查同步状态
-- 如果 can_continue = 0 或有待同步章节，禁止续写
-
-### 2. 读取上下文
-- 用 readFile 读取 .claude/skills/novel-pro/workflows/03-continue-next-chapter.md
-- 用 getStoryContext 获取故事上下文
-- 用 readFile 读取需要的真相文件
-
-### 3. 执行流水线
-按 workflow 中的执行顺序：
-- Planner → 用 readFile 读取 agents/planner.md，生成章节意图
-- Composer → 用 readFile 读取 agents/composer.md，压缩上下文包
-- Writer → 用 readFile 读取 agents/writer.md，生成正文
-- Observer → 用 readFile 读取 agents/observer.md，提取事实
-- Settler → 用 readFile 读取 agents/settler.md，写总账+刷快照
-- Auditor → 用 readFile 读取 agents/auditor.md，审计
-
-### 4. 更新数据
-- 用 addFact 添加事实
-- 用 addHook/updateHook 更新伏笔
-- 用 updateSummary 更新章节摘要
-- 用 updateSync 更新同步状态
-- 用 updateStoryCharacter 更新角色
-- 用 updateState 更新当前状态
-
 ## 使用原则
-1. **先读文件再回答**：不要凭记忆，主动读取真相文件和 novel-pro 技能文件
-2. **遵循 novel-pro 流程**：续写时按流水线执行，读取对应的 agent 文档
-3. **事实优先**：基于真相文件回答，不要编造
-4. **最小加载**：只读取需要的文件
-5. **写入需确认**：重要操作前先和用户确认`;
+1. 先用工具查询数据再回答，不要凭记忆
+2. 续写时按 novel-pro 流程执行：门禁检查 → 读上下文 → Planner → Composer → Writer → Observer → Settler → Auditor
+3. 事实优先，不要编造
+4. 写入前和用户确认
+5. 不要在回复中提及工具名称（如 readFile、getStoryContext 等），直接说结果
+
+## novel-pro 续写流程
+当用户要"写下一章"时：
+1. 用 getSync 检查门禁
+2. 用 getStoryContext 获取故事上下文
+3. 用 readFile 读取 .claude/skills/novel-pro/workflows/03-continue-next-chapter.md
+4. 按 workflow 顺序执行各 agent（用 readFile 读取对应的 agents/*.md）
+5. 用 addFact/addHook/updateSummary/updateSync/updateStoryCharacter/updateState 更新数据`;
 
   return basePrompt;
 }
@@ -204,49 +140,62 @@ export async function POST(request: NextRequest) {
     // 构建系统提示（包含记忆上下文）
     const fullSystemPrompt = systemPrompt + (memoryContext ? '\n\n' + memoryContext : '');
 
-    // 调用模型（带工具调用能力）
+    // 构建消息列表
     const modelMessages = [
       { role: 'system' as const, content: fullSystemPrompt },
       ...messages.map(m => ({ role: m.role, content: m.content })),
     ];
 
-    const result = await callModelWithTools(model, modelMessages, tools);
+    // 调用模型（流式 + 工具调用）
+    const streamPromise = streamModelWithTools(model, modelMessages, tools);
 
-    // 构建响应文本
-    let responseText = result.text;
+    // 返回 SSE 流式响应
+    const encoder = new TextEncoder();
+    const readable = new ReadableStream({
+      async start(controller) {
+        let fullText = '';
 
-    // 如果 AI 没有生成文本回复，但调用了工具，生成一个默认回复
-    if (!responseText && result.toolResults && result.toolResults.length > 0) {
-      const lastResult = result.toolResults[result.toolResults.length - 1];
-      if (lastResult?.result) {
-        responseText = `我查询了相关数据：\n\n${JSON.stringify(lastResult.result, null, 2)}`;
-      }
-    }
+        try {
+          const result = await streamPromise;
+          for await (const chunk of result.textStream) {
+            fullText += chunk;
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'chunk', text: chunk })}\n\n`));
+          }
 
-    // 保存 AI 响应到数据库
-    addChatMessage(currentSessionId, 'assistant', responseText, {
-      model,
-      context,
-      chapterId,
-      toolCalls: result.toolCalls?.map((tc: any) => tc.toolName),
+          // 从流结果中获取工具调用
+          const toolCalls = await result.toolCalls;
+          const toolCallNames = toolCalls?.map((tc: any) => tc.toolName) || [];
+
+          // 发送完成事件（包含元数据）
+          const responseText = cleanToolCallArtifacts(fullText) || '抱歉，我没有生成回复。请重试或换个方式提问。';
+
+          // 保存到数据库
+          addChatMessage(currentSessionId, 'assistant', responseText, {
+            model,
+            context,
+            chapterId,
+            toolCalls: toolCallNames,
+          });
+
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            type: 'done',
+            sessionId: currentSessionId,
+            message: responseText,
+            toolCalls: toolCallNames,
+          })}\n\n`));
+        } catch (err) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: String(err) })}\n\n`));
+        } finally {
+          controller.close();
+        }
+      },
     });
 
-    return NextResponse.json({
-      success: true,
-      sessionId: currentSessionId,
-      message: responseText,
-      toolCalls: result.toolCalls?.map((tc: any) => ({
-        name: tc.toolName,
-        args: tc.args,
-      })),
-      toolResults: result.toolResults?.map((tr: any) => ({
-        toolCallId: tr.toolCallId,
-        result: tr.result,
-      })),
-      context: {
-        chapterId,
-        model,
-        contextType: context,
+    return new Response(readable, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
       },
     });
   } catch (error) {

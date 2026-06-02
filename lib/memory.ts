@@ -91,7 +91,13 @@ export function searchMemories(novelId: string, query: string): Memory[] {
 // 获取相关记忆（根据关键词）
 export function getRelevantMemories(novelId: string, keywords: string[]): Memory[] {
   const db = getDatabase();
-  
+
+  if (keywords.length === 0) {
+    return db.prepare(`
+      SELECT * FROM memories WHERE novel_id = ? ORDER BY importance DESC, use_count DESC LIMIT 10
+    `).all(novelId) as Memory[];
+  }
+
   const conditions = keywords.map(() => '(key LIKE ? OR content LIKE ?)').join(' OR ');
   const params = [novelId, ...keywords.flatMap(k => [`%${k}%`, `%${k}%`])];
 

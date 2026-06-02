@@ -104,13 +104,39 @@ export async function addModelConfig(config: Omit<ModelConfig, 'id' | 'createdAt
   };
 }
 
-// 更新模型配置
+// 更新模型配置（不存在则创建）
 export async function updateModelConfig(id: string, updates: Partial<ModelConfig>): Promise<ModelConfig | null> {
   const db = getDatabase();
   const now = new Date().toISOString();
 
   const existing = db.prepare('SELECT * FROM model_configs WHERE id = ?').get(id) as any;
-  if (!existing) return null;
+
+  // 如果不存在，创建新记录
+  if (!existing) {
+    db.prepare(`
+      INSERT INTO model_configs (id, name, provider, enabled, is_default, settings, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      updates.name || id,
+      updates.provider || 'custom',
+      updates.enabled !== undefined ? (updates.enabled ? 1 : 0) : 1,
+      updates.isDefault ? 1 : 0,
+      JSON.stringify(updates.settings || {}),
+      now,
+      now
+    );
+    return {
+      id,
+      name: updates.name || id,
+      provider: updates.provider || 'custom',
+      enabled: updates.enabled !== undefined ? updates.enabled : true,
+      isDefault: updates.isDefault || false,
+      settings: updates.settings || {},
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
 
   const updatedConfig = {
     ...JSON.parse(existing.settings),

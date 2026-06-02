@@ -90,15 +90,52 @@ export async function callModelWithTools(
     messages: nonSystemMessages,
     system: systemPrompt,
     tools,
-    stopWhen: stepCountIs(10), // 允许多轮工具调用
+    stopWhen: stepCountIs(20), // 允许多轮工具调用（复杂审计可能需要读多个文件）
     temperature: 0.8,
   });
 
+  // 清理模型输出的工具调用文本伪影（当模型不支持 function calling 时会模仿输出）
+  let text = cleanToolCallArtifacts(result.text || '');
+
+  // 从 steps 中提取工具调用和结果（AI SDK v6 的顶层属性可能为空）
+  const allToolCalls: any[] = [];
+  const allToolResults: any[] = [];
+  for (const step of result.steps || []) {
+    if (step.toolCalls) allToolCalls.push(...step.toolCalls);
+    if (step.toolResults) allToolResults.push(...step.toolResults);
+  }
+
+  // 如果模型调了工具但没生成文本，从最后一步的工具结果构造兜底文本
+  if (!text && allToolResults.length > 0) {
+    const lastResult = allToolResults[allToolResults.length - 1];
+    if (lastResult?.result) {
+      const preview = typeof lastResult.result === 'string'
+        ? lastResult.result
+        : JSON.stringify(lastResult.result, null, 2);
+      text = `我查询了相关数据：\n\n${preview.substring(0, 2000)}`;
+    }
+  }
+
   return {
-    text: result.text,
-    toolCalls: result.toolCalls || [],
-    toolResults: result.toolResults || [],
+    text: text || '',
+    toolCalls: allToolCalls,
+    toolResults: allToolResults,
   };
+}
+
+// 清理模型输出中的工具调用文本伪影
+export function cleanToolCallArtifacts(text: string): string {
+  if (!text) return text;
+  return text
+    // 移除 --- Begin [...] --- / --- End [...] --- 包裹的块
+    .replace(/--- Begin \[[^\]]*\] ---[\s\S]*?--- End \[[^\]]*\] ---\s*/g, '')
+    // 移除所有 🔧 相关内容（行内或单独一行）
+    .replace(/🔧[^\n]*/g, '')
+    // 移除工具名+括号调用模式，如 readFile(...)、getChapter(...)
+    .replace(/\b(readFile|listDirectory|searchFiles|getChapter|listChapters|searchChapters|getCharacter|listCharacters|getForeshadowing|listForeshadowing|getOutline|getStats|queryDatabase|saveChapter|getStoryContext|getFacts|addFact|getHooks|addHook|updateHook|getSync|updateSync|getStoryCharacters|updateStoryCharacter|getSummaries|updateSummary|getState|updateState|getPlotlines|updatePlotline|getResources|addResource|compareTexts|saveMemory|searchMemory|listMemories|getVersionHistory|getGitStatus|getGitLog|gitCommit)\s*\([^)]*\)\s*/g, '')
+    // 清理多余空行
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 // 测试模型连接

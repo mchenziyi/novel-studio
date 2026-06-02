@@ -294,3 +294,27 @@ button:disabled {
 .tooltip:hover::after {
   opacity: 1;
 }
+
+/* Chat Markdown 渲染样式 */
+.chat-markdown strong {
+  font-weight: 600;
+}
+
+.chat-markdown a {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+/* 用户消息（白字黑底）中的 markdown */
+.chat-markdown-light strong {
+  font-weight: 600;
+}
+
+.chat-markdown-light a {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+.chat-markdown-light code {
+  background: rgba(255,255,255,0.15) !important;
+}
