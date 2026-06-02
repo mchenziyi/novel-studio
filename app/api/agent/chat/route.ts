@@ -42,13 +42,19 @@ function buildSystemPrompt(context: string, novelId: string): string {
 4. 写入前和用户确认
 5. 不要在回复中提及工具名称（如 readFile、getStoryContext 等），直接说结果
 
+## 章节状态流转
+- pending → audit：saveChapter 工具会自动设置
+- audit → synced：审计通过且故事数据入库后，用 markChapterStatus 工具标记
+- 不要跳过状态，必须先 audit 再 synced
+
 ## novel-pro 续写流程
 当用户要"写下一章"时：
 1. 用 getSync 检查门禁
 2. 用 getStoryContext 获取故事上下文
 3. 用 readFile 读取 .claude/skills/novel-pro/workflows/03-continue-next-chapter.md
 4. 按 workflow 顺序执行各 agent（用 readFile 读取对应的 agents/*.md）
-5. 用 addFact/addHook/updateSummary/updateSync/updateStoryCharacter/updateState 更新数据`;
+5. 用 addFact/addHook/updateSummary/updateSync/updateStoryCharacter/updateState 更新数据
+6. 入库完成后用 markChapterStatus 把章节标记为 synced`;
 
   return basePrompt;
 }

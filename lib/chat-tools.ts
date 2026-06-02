@@ -98,12 +98,42 @@ export function createSaveChapterTool(ctx: ToolContext) {
         agentName: 'ChatAgent',
         description: description || '通过 ChatAgent 保存',
       });
+      // 保存后标记为 audit 状态
+      const db = getDatabase();
+      db.prepare("UPDATE chapters SET status = 'audit' WHERE id = ?").run(id);
       return {
         success: true,
         chapterId: id,
         wordCount: content.length,
         versionId: version.id,
-        message: `已保存第${chapterId}章，共 ${content.length} 字`,
+        message: `已保存第${chapterId}章，共 ${content.length} 字，状态已更新为 audit`,
+      };
+    },
+  };
+}
+
+// ==================== 章节状态工具 ====================
+
+export function createMarkChapterStatusTool(ctx: ToolContext) {
+  return {
+    description: '标记章节状态。audit：章节已保存待审计。synced：审计通过且故事数据已入库。',
+    parameters: z.object({
+      chapterId: z.number().describe('章节编号'),
+      status: z.enum(['audit', 'synced']).describe('目标状态'),
+    }),
+    execute: async ({ chapterId, status }: { chapterId: number; status: 'audit' | 'synced' }) => {
+      const id = String(chapterId).padStart(4, '0');
+      const db = getDatabase();
+      const result = db.prepare('UPDATE chapters SET status = ?, updated_at = ? WHERE id = ?')
+        .run(status, new Date().toISOString(), id);
+      if (result.changes === 0) {
+        return { error: `第${chapterId}章不存在` };
+      }
+      return {
+        success: true,
+        chapterId: id,
+        status,
+        message: `第${chapterId}章状态已更新为 ${status}`,
       };
     },
   };
@@ -375,6 +405,7 @@ export function createChatAgentTools(novelId: string) {
     listChapters: createListChaptersTool(ctx),
     searchChapters: createSearchChaptersTool(ctx),
     saveChapter: createSaveChapterTool(ctx),
+    markChapterStatus: createMarkChapterStatusTool(ctx),
     // 角色（数据库）
     listCharacters: createListCharactersTool(ctx),
     getCharacter: createGetCharacterTool(ctx),
