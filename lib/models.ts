@@ -90,7 +90,7 @@ export async function callModelWithTools(
     messages: nonSystemMessages,
     system: systemPrompt,
     tools,
-    stopWhen: stepCountIs(20), // 允许多轮工具调用（复杂审计可能需要读多个文件）
+    stopWhen: stepCountIs(50), // 允许多轮工具调用（复杂审计可能需要读多个文件）
     temperature: 0.8,
   });
 
@@ -188,10 +188,12 @@ export async function streamModelWithTools(
     messages: nonSystemMessages,
     system: systemPrompt,
     tools,
-    stopWhen: stepCountIs(20),
+    stopWhen: stepCountIs(50),
     temperature: 0.8,
   });
 }
+
+// 测试模型连接
 
 // 获取所有可用模型
 export async function getAvailableModels(): Promise<ModelConfig[]> {
