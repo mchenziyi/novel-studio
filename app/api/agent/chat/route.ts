@@ -235,8 +235,21 @@ export async function POST(request: NextRequest) {
           const toolCalls = await result.toolCalls;
           const toolCallNames = toolCalls?.map((tc: any) => tc.toolName) || [];
 
+          // 获取工具结果
+          const toolResults: any[] = [];
+          for (const step of result.steps || []) {
+            if (step.toolResults) toolResults.push(...step.toolResults);
+          }
+
           // 发送完成事件（包含元数据）
-          const responseText = cleanToolCallArtifacts(fullText) || '抱歉，我没有生成回复。请重试或换个方式提问。';
+          let responseText = cleanToolCallArtifacts(fullText);
+          if (!responseText) {
+            if (toolCallNames.length > 0) {
+              responseText = `我执行了 ${toolCallNames.join('、')} 等工具，但模型没有生成文字回复。请重试或换个方式提问。`;
+            } else {
+              responseText = '模型没有生成回复。请重试或换个方式提问。';
+            }
+          }
 
           // 保存到数据库
           addChatMessage(currentSessionId, 'assistant', responseText, {

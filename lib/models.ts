@@ -188,7 +188,7 @@ export async function streamModelWithTools(
     messages: nonSystemMessages,
     system: systemPrompt,
     tools,
-    stopWhen: stepCountIs(10),
+    stopWhen: stepCountIs(20),
     temperature: 0.8,
   });
 }
