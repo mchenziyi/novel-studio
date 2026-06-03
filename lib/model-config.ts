@@ -10,11 +10,7 @@ export async function getModelConfigs(): Promise<ModelConfig[]> {
   const db = getDatabase();
   const rows = db.prepare('SELECT * FROM model_configs ORDER BY is_default DESC, name').all() as any[];
 
-  if (rows.length === 0) {
-    return getDefaultModelConfigs();
-  }
-
-  return rows.map(row => ({
+  const dbConfigs = rows.map(row => ({
     id: row.id,
     name: row.name,
     provider: row.provider,
@@ -24,6 +20,21 @@ export async function getModelConfigs(): Promise<ModelConfig[]> {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }));
+
+  // 如果 DB 为空，返回默认配置
+  if (dbConfigs.length === 0) {
+    return getDefaultModelConfigs();
+  }
+
+  // 合并：DB 配置 + 环境变量中的默认模型（如果 DB 里没有的话）
+  const defaults = getDefaultModelConfigs();
+  for (const def of defaults) {
+    if (!dbConfigs.some(c => c.id === def.id)) {
+      dbConfigs.push(def);
+    }
+  }
+
+  return dbConfigs;
 }
 
 // 保存模型配置

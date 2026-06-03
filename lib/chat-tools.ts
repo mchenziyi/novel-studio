@@ -47,7 +47,7 @@ export function createGetChapterTool(ctx: ToolContext) {
 export function createListChaptersTool(ctx: ToolContext) {
   return {
     description: '获取所有章节的列表（标题、字数、状态）。当用户想知道有哪些章节、最新章节、总章数时使用。',
-    parameters: z.object({}),
+    parameters: z.object({ _noop: z.string().optional().describe('ignore') }),
     execute: async () => {
       const chapters = await getChapters(ctx.novelId);
       return {
@@ -144,7 +144,7 @@ export function createMarkChapterStatusTool(ctx: ToolContext) {
 export function createListCharactersTool(ctx: ToolContext) {
   return {
     description: '获取所有角色列表。当用户询问有哪些角色、角色关系、某个角色的信息时使用。',
-    parameters: z.object({}),
+    parameters: z.object({ _noop: z.string().optional().describe('ignore') }),
     execute: async () => {
       const characters = await getCharacters(ctx.novelId);
       return {
@@ -446,7 +446,7 @@ export function createImportStyleTool(ctx: ToolContext) {
 export function createGetActiveStyleTool(ctx: ToolContext) {
   return {
     description: '获取当前激活的文风配置。',
-    parameters: z.object({}),
+    parameters: z.object({ _noop: z.string().optional().describe('ignore') }),
     execute: async () => {
       const db = getDatabase();
       const row = db.prepare('SELECT * FROM style_profiles WHERE novel_id = ? AND is_active = 1').get(ctx.novelId) as any;
@@ -466,7 +466,7 @@ export function createGetActiveStyleTool(ctx: ToolContext) {
 export function createGetOutlineTool(ctx: ToolContext) {
   return {
     description: '获取小说大纲。当用户询问故事大纲、整体结构、后续走向时使用。',
-    parameters: z.object({}),
+    parameters: z.object({ _noop: z.string().optional().describe('ignore') }),
     execute: async () => {
       const outline = await getOutline();
       return {
@@ -493,7 +493,7 @@ export function createGetOutlineTool(ctx: ToolContext) {
 export function createGetStatsTool(ctx: ToolContext) {
   return {
     description: '获取写作统计数据。当用户询问总字数、章节数、写作进度、平均字数等统计信息时使用。',
-    parameters: z.object({}),
+    parameters: z.object({ _noop: z.string().optional().describe('ignore') }),
     execute: async () => {
       const stats = await getStats();
       return stats;
@@ -533,7 +533,7 @@ export function createGetVersionHistoryTool(ctx: ToolContext) {
 export function createGetGitStatusTool(ctx: ToolContext) {
   return {
     description: '获取 Git 仓库状态。当用户询问当前修改、分支状态、是否有未提交的更改时使用。',
-    parameters: z.object({}),
+    parameters: z.object({ _noop: z.string().optional().describe('ignore') }),
     execute: async () => {
       const status = await getGitStatus();
       return {
