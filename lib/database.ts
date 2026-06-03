@@ -348,6 +348,15 @@ function initializeDatabase(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);
     CREATE INDEX IF NOT EXISTS idx_memories_novel_id ON memories(novel_id);
     CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
+    CREATE TABLE IF NOT EXISTS novel_configs (
+      novel_id TEXT NOT NULL,
+      config_key TEXT NOT NULL,
+      config_value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (novel_id, config_key),
+      FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance);
     CREATE INDEX IF NOT EXISTS idx_story_facts_novel_id ON story_facts(novel_id);
     CREATE INDEX IF NOT EXISTS idx_story_facts_chapter ON story_facts(chapter);

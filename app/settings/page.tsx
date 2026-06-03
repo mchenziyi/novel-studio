@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { ModelConfig, ModelProvider, MODEL_PRESETS } from '@/types/model';
 import { GlobalSettings } from '@/types/settings';
+import { NovelConfigPanel } from '@/components/settings/novel-config';
 
 export default function SettingsPage() {
   const [models, setModels] = useState<ModelConfig[]>([]);
@@ -348,6 +349,22 @@ export default function SettingsPage() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* 小说写作配置 */}
+        <div className="bg-white rounded-2xl border border-[#e8e8e8] p-6 mb-8">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-[#f5f5f5] flex items-center justify-center">
+              <svg className="w-5 h-5 text-[#525252]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-[16px] font-semibold text-[#171717]">小说写作配置</h2>
+              <p className="text-[13px] text-[#737373]">配置 AI 写作时必须遵循的规范和风格要求</p>
+            </div>
+          </div>
+          <NovelConfigPanel />
         </div>
 
         {/* 添加模型按钮 */}

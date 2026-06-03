@@ -29,11 +29,23 @@ interface ChatRequest {
 }
 
 // 构建系统提示
-function buildSystemPrompt(context: string, novelId: string): string {
+function buildSystemPrompt(context: string, novelId: string, novelConfig?: any): string {
+  let configSection = '';
+  if (novelConfig) {
+    configSection = `
+## 写作规范（必须遵循）
+- 目标总字数：${novelConfig.targetTotalWords?.toLocaleString() || '未设置'} 字
+- 每章字数：${novelConfig.minWordsPerChapter || 2000}-${novelConfig.maxWordsPerChapter || 5000} 字
+${novelConfig.writingStyleRules?.length ? `\n### 文风规则\n${novelConfig.writingStyleRules.map((r: string) => `- ${r}`).join('\n')}` : ''}
+${novelConfig.forbiddenPatterns?.length ? `\n### 禁止写法\n${novelConfig.forbiddenPatterns.map((r: string) => `- ${r}`).join('\n')}` : ''}
+${novelConfig.coreSettings?.length ? `\n### 核心设定\n${novelConfig.coreSettings.map((r: string) => `- ${r}`).join('\n')}` : ''}`;
+  }
+
   const basePrompt = `你是 Novel Studio 的 AI 写作助手。
 
 ## 项目信息
 - 当前小说 ID：${novelId}
+${configSection}
 
 ## 使用原则
 1. 先用工具查询数据再回答，不要凭记忆
@@ -41,6 +53,16 @@ function buildSystemPrompt(context: string, novelId: string): string {
 3. 事实优先，不要编造
 4. 写入前和用户确认
 5. 不要在回复中提及工具名称（如 readFile、getStoryContext 等），直接说结果
+
+## 记忆保存（重要）
+你必须主动保存学到的知识，不要等用户要求。以下情况必须调用 saveMemory：
+- 用户纠正你的错误 → category: correction, importance: 5
+- 用户透露角色设定（性格、关系、能力等）→ category: character, importance: 4
+- 用户讨论世界观规则 → category: world_rule, importance: 4
+- 用户提出文风要求或偏好 → category: writing_style, importance: 4
+- 用户讨论剧情规则或时间线 → category: plot_rule, importance: 3
+- 你从对话中发现重要事实 → category: fact, importance: 3
+- 用户表达偏好（喜欢/讨厌什么）→ category: user_preference, importance: 3
 
 ## 章节状态流转
 - pending → audit：saveChapter 工具会自动设置
@@ -127,8 +149,20 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // 加载小说写作配置
+    const { getDatabase } = await import('@/lib/database');
+    const db = getDatabase();
+    const configRows = db.prepare('SELECT config_key, config_value FROM novel_configs WHERE novel_id = ?').all(novelId) as any[];
+    let novelConfig: any = null;
+    if (configRows.length > 0) {
+      novelConfig = {};
+      for (const row of configRows) {
+        try { novelConfig[row.config_key] = JSON.parse(row.config_value); } catch { novelConfig[row.config_key] = row.config_value; }
+      }
+    }
+
     // 构建系统提示
-    const systemPrompt = buildSystemPrompt(context, novelId);
+    const systemPrompt = buildSystemPrompt(context, novelId, novelConfig);
 
     // 创建工具集（基于当前小说 ID）
     const tools = createChatAgentTools(novelId);
