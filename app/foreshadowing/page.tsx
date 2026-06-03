@@ -87,10 +87,10 @@ export default function ForeshadowingPage() {
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'planted': return '🌱';
-      case 'progressing': return '🔄';
-      case 'resolved': return '✅';
-      default: return '❓';
+      case 'planted': return <span className="inline-block w-2 h-2 rounded-full bg-blue-500" />;
+      case 'progressing': return <span className="inline-block w-2 h-2 rounded-full bg-yellow-500" />;
+      case 'resolved': return <span className="inline-block w-2 h-2 rounded-full bg-green-500" />;
+      default: return <span className="inline-block w-2 h-2 rounded-full bg-gray-400" />;
     }
   };
 
@@ -137,8 +137,8 @@ export default function ForeshadowingPage() {
               <p className="text-sm text-gray-500">总伏笔数</p>
               <p className="text-3xl font-bold text-gray-900">{stats.total}</p>
             </div>
-            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center text-2xl">
-              🔗
+            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+              <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.813a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L5.25 9.688" /></svg>
             </div>
           </div>
         </div>
@@ -148,8 +148,8 @@ export default function ForeshadowingPage() {
               <p className="text-sm text-gray-500">已埋设</p>
               <p className="text-3xl font-bold text-blue-600">{stats.planted}</p>
             </div>
-            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center text-2xl">
-              🌱
+            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+              <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
             </div>
           </div>
         </div>
@@ -159,8 +159,8 @@ export default function ForeshadowingPage() {
               <p className="text-sm text-gray-500">推进中</p>
               <p className="text-3xl font-bold text-yellow-600">{stats.progressing}</p>
             </div>
-            <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center text-2xl">
-              🔄
+            <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
+              <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4.5 12.75l6 6 9-13.5" /></svg>
             </div>
           </div>
         </div>
@@ -171,8 +171,8 @@ export default function ForeshadowingPage() {
               <p className="text-3xl font-bold text-green-600">{stats.resolved}</p>
               <p className="text-xs text-gray-400 mt-1">回收率: {resolutionRate}%</p>
             </div>
-            <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center text-2xl">
-              ✅
+            <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+              <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
             </div>
           </div>
         </div>
@@ -257,7 +257,7 @@ export default function ForeshadowingPage() {
         <div className="space-y-4">
           {filteredForeshadowing.length === 0 ? (
             <div className="text-center py-12 bg-white rounded-xl">
-              <div className="text-4xl mb-4">🔍</div>
+              <svg className="w-10 h-10 text-[#a3a3a3] mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
               <p className="text-gray-500">没有找到匹配的伏笔</p>
             </div>
           ) : (
@@ -435,7 +435,7 @@ export default function ForeshadowingPage() {
                 .slice(0, 5)
                 .map((item) => (
                   <div key={item.id} className="flex items-center space-x-3 p-2 bg-gray-50 rounded">
-                    <span>🌱</span>
+                    <span className="inline-block w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
                     <div className="flex-1">
                       <div className="text-sm font-medium">{item.name}</div>
                       <div className="text-xs text-gray-500">第{item.plantedChapter}章</div>
@@ -455,7 +455,7 @@ export default function ForeshadowingPage() {
                 .slice(0, 5)
                 .map((item) => (
                   <div key={item.id} className="flex items-center space-x-3 p-2 bg-green-50 rounded">
-                    <span>✅</span>
+                    <svg className="w-4 h-4 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                     <div className="flex-1">
                       <div className="text-sm font-medium">{item.name}</div>
                       <div className="text-xs text-green-600">
