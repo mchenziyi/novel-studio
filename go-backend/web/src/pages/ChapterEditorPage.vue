@@ -44,7 +44,8 @@ const toolCalls = ref<any[]>([])
 let abortCtrl: AbortController | null = null
 
 // Sync scroll
-const leftScroll = ref<HTMLElement>(); const rightScroll = ref<HTMLElement>()
+const leftScroll = ref<HTMLElement>()
+const editorScroll = ref<HTMLElement>()
 let vSync = false
 
 // Paragraph selector
@@ -166,9 +167,11 @@ async function rollback() {
   await loadVersions()
 }
 
-function onLeftVS() { if (vSync||!rightScroll.value) return; vSync=true; rightScroll.value.scrollTop=leftScroll.value!.scrollTop; rightScroll.value.scrollLeft=leftScroll.value!.scrollLeft; requestAnimationFrame(()=>vSync=false) }
+function onLeftVS() { if (vSync||!editorScroll.value) return; vSync=true; editorScroll.value.scrollTop=leftScroll.value!.scrollTop; editorScroll.value.scrollLeft=leftScroll.value!.scrollLeft; requestAnimationFrame(()=>vSync=false) }
+function onEditorScroll() { if (vSync||!leftScroll.value) return; vSync=true; leftScroll.value.scrollTop=editorScroll.value!.scrollTop; leftScroll.value.scrollLeft=editorScroll.value!.scrollLeft; requestAnimationFrame(()=>vSync=false) }
 
 const leftLines = computed(()=>prevContent.value.split('\n'))
+const editorLines = computed(() => content.value.split('\n'))
 
 function renderDiffLine(text:string, blockType:string, side:'left'|'right', cd:any, lineOff:number): string {
   if (!cd || blockType==='equal') return esc(text||' ')
@@ -283,13 +286,22 @@ const statusLabel:{[k:string]:string} = {synced:'已同步',pending:'待处理',
       <!-- Drag handle 1 -->
       <div class="w-[3px] bg-transparent hover:bg-[#ddd] cursor-col-resize shrink-0 z-10 transition-colors" @mousedown="(e:any)=>onDragStart(e,'left')" />
 
-      <!-- Panel 2: Editor (middle) -->
+      <!-- Panel 2: Editor (middle) with line numbers -->
       <div :style="{ width: midW + '%' }" class="flex flex-col shrink-0 relative">
         <div class="h-7 px-3 flex items-center text-[11px] text-[#999] bg-[#fafafa] border-b border-[#e5e5e5] shrink-0 font-mono justify-between">
-          <span>编辑区</span><span>{{ wordCount }}字</span>
+          <span>编辑区</span><span>{{ wordCount }}字 · {{ editorLines.length }}行</span>
         </div>
-        <textarea v-model="content" class="flex-1 resize-none border-0 outline-none text-sm leading-7 text-[#1a1a1a] bg-transparent p-4 font-serif placeholder:text-[#ddd]" 
-          placeholder="开始写作..." spellcheck="false" style="font-family: 'Georgia','Noto Serif SC',serif" @mouseup="onMouseUp" />
+        <div ref="editorScroll" class="flex-1 overflow-auto" @scroll="onEditorScroll">
+          <div class="flex min-h-full font-mono text-[13px] leading-6">
+            <!-- Line numbers gutter -->
+            <div class="shrink-0 select-none text-right pr-2 pt-4 pb-4 text-[11px] text-[#ccc] bg-[#fcfcfc] border-r border-[#f0f0f0]" style="width:44px">
+              <div v-for="(_, i) in editorLines" :key="i" class="leading-6">{{ i + 1 }}</div>
+            </div>
+            <!-- Textarea -->
+            <textarea v-model="content" class="flex-1 resize-none border-0 outline-none text-sm text-[#1a1a1a] bg-transparent p-4 font-serif placeholder:text-[#ddd]" 
+              placeholder="开始写作..." spellcheck="false" style="font-family: 'Georgia','Noto Serif SC',serif; line-height:1.5rem" @mouseup="onMouseUp" />
+          </div>
+        </div>
         <div v-if="showInlineBtn" class="absolute top-10 right-4 bg-white border border-[#e5e5e5] rounded-lg shadow-lg px-3 py-1.5 text-xs cursor-pointer hover:bg-[#f5f5f5] z-20" @click="aiEditSelected">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="inline mr-1"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>AI 修改所选段落</div>
       </div>
