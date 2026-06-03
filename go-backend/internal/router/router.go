@@ -47,5 +47,11 @@ func Setup(db *sql.DB) *gin.Engine {
 	handler.RegisterStatsRoutes(api, db)
 	handler.RegisterMigrationRoutes(api, db)
 
+	// New: Git, Settings, Files, Models advanced
+	handler.RegisterGitRoutes(api, db)
+	handler.RegisterSettingsRoutes(api, db)
+	handler.RegisterFilesRoutes(api, db)
+	handler.RegisterModelsExtRoutes(api, db)
+
 	return r
 }
