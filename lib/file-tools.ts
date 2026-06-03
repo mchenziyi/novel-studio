@@ -9,7 +9,7 @@ const PROJECT_ROOT = process.env.NOVEL_PROJECT_PATH || '/Users/czy/Downloads/boo
 export function createReadFileTool(ctx: ToolContext) {
   return {
     description: `读取小说项目中的文件。可以读取章节、故事文件、技能文档等。项目根目录：${PROJECT_ROOT}`,
-    parameters: z.object({
+    inputSchema: z.object({
       filePath: z.string().describe('相对于项目根目录的文件路径，如 "chapters/0074_灰香.md" 或 "故事/伏笔池.md"'),
     }),
     execute: async ({ filePath }: { filePath: string }) => {
@@ -36,7 +36,7 @@ export function createReadFileTool(ctx: ToolContext) {
 export function createListDirectoryTool(ctx: ToolContext) {
   return {
     description: `列出小说项目目录中的文件和子目录。项目根目录：${PROJECT_ROOT}`,
-    parameters: z.object({
+    inputSchema: z.object({
       dirPath: z.string().optional().describe('相对于项目根目录的目录路径，默认为根目录'),
     }),
     execute: async ({ dirPath }: { dirPath?: string }) => {
@@ -74,7 +74,7 @@ export function createListDirectoryTool(ctx: ToolContext) {
 export function createSearchFilesTool(ctx: ToolContext) {
   return {
     description: `在小说项目中搜索文件内容。可以搜索章节、故事文件等。项目根目录：${PROJECT_ROOT}`,
-    parameters: z.object({
+    inputSchema: z.object({
       query: z.string().describe('搜索关键词'),
       dirPath: z.string().optional().describe('搜索目录，默认为整个项目'),
       filePattern: z.string().optional().describe('文件名模式，如 "*.md"'),

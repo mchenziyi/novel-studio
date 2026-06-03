@@ -6,7 +6,7 @@ import { ToolContext } from './chat-tools';
 export function createCompareTextsTool(ctx: ToolContext) {
   return {
     description: '对比两段文本的差异。支持按行、按词、按字符对比。用于对比修改前后的章节内容。',
-    parameters: z.object({
+    inputSchema: z.object({
       oldText: z.string().describe('原始文本'),
       newText: z.string().describe('修改后的文本'),
       mode: z.enum(['line', 'word', 'char']).optional().describe('对比模式：line=按行, word=按词, char=按字符，默认按行'),
@@ -71,7 +71,7 @@ export function createCompareTextsTool(ctx: ToolContext) {
 export function createCompareChaptersTool(ctx: ToolContext) {
   return {
     description: '对比两个章节版本的差异。可以对比当前版本和历史版本，或两个不同章节。',
-    parameters: z.object({
+    inputSchema: z.object({
       chapterId1: z.string().describe('第一个章节ID，如 "0074"'),
       chapterId2: z.string().optional().describe('第二个章节ID，不提供则对比当前版本和上一版本'),
       versionId1: z.string().optional().describe('第一个章节的版本ID'),

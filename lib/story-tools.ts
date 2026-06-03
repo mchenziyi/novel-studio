@@ -27,7 +27,7 @@ import {
 export function createGetStoryContextTool(ctx: ToolContext) {
   return {
     description: '获取小说的完整故事上下文（事实、伏笔、摘要、状态、角色、资源、支线、同步状态）。用于了解小说当前状态。',
-    parameters: z.object({}),
+    inputSchema: z.object({}),
     execute: async () => {
       const context = getStoryContext(ctx.novelId);
       const stats = getStoryStats(ctx.novelId);
@@ -50,7 +50,7 @@ export function createGetStoryContextTool(ctx: ToolContext) {
 export function createGetFactsTool(ctx: ToolContext) {
   return {
     description: '获取事实总账。可按章节筛选。',
-    parameters: z.object({
+    inputSchema: z.object({
       chapter: z.number().optional().describe('章节号，不传则返回全部'),
     }),
     execute: async ({ chapter }: { chapter?: number }) => {
@@ -64,7 +64,7 @@ export function createGetFactsTool(ctx: ToolContext) {
 export function createAddFactTool(ctx: ToolContext) {
   return {
     description: '添加一条事实到总账。fact_id 格式：F-{4位章号}-{2位序号}，如 F-0074-01',
-    parameters: z.object({
+    inputSchema: z.object({
       id: z.string().describe('fact_id，如 F-0074-01'),
       chapter: z.number().describe('章节号'),
       category: z.string().describe('事实分类：角色行为/位置变化/资源变化/关系变化/情绪变化/信息流动/剧情线索/时间推进/身体状态'),
@@ -83,7 +83,7 @@ export function createAddFactTool(ctx: ToolContext) {
 export function createGetHooksTool(ctx: ToolContext) {
   return {
     description: '获取伏笔池。可按状态筛选。',
-    parameters: z.object({
+    inputSchema: z.object({
       status: z.enum(['open', 'progressing', 'resolved', 'all']).optional().describe('状态筛选'),
     }),
     execute: async ({ status }: { status?: string }) => {
@@ -97,7 +97,7 @@ export function createGetHooksTool(ctx: ToolContext) {
 export function createAddHookTool(ctx: ToolContext) {
   return {
     description: '添加一条伏笔。hook_id 格式：hook-{章号}-{序号}',
-    parameters: z.object({
+    inputSchema: z.object({
       id: z.string().describe('hook_id，如 hook-74-01'),
       chapter: z.number().optional().describe('埋设章节'),
       content: z.string().describe('伏笔内容'),
@@ -114,7 +114,7 @@ export function createAddHookTool(ctx: ToolContext) {
 export function createUpdateHookTool(ctx: ToolContext) {
   return {
     description: '更新伏笔状态（open/progressing/resolved）。',
-    parameters: z.object({
+    inputSchema: z.object({
       id: z.string().describe('hook_id'),
       status: z.enum(['open', 'progressing', 'resolved']).describe('新状态'),
     }),
@@ -129,7 +129,7 @@ export function createUpdateHookTool(ctx: ToolContext) {
 export function createGetSyncTool(ctx: ToolContext) {
   return {
     description: '获取同步状态（门禁文件）。',
-    parameters: z.object({}),
+    inputSchema: z.object({}),
     execute: async () => {
       const sync = getStorySync(ctx.novelId);
       return sync || { synced_chapter: 0, total_facts: 0, latest_chapter: 0, can_continue: 1 };
@@ -140,7 +140,7 @@ export function createGetSyncTool(ctx: ToolContext) {
 export function createUpdateSyncTool(ctx: ToolContext) {
   return {
     description: '更新同步状态。续写完成后调用。',
-    parameters: z.object({
+    inputSchema: z.object({
       synced_chapter: z.number().describe('已同步到的章节'),
       total_facts: z.number().optional().describe('累计事实数'),
       latest_chapter: z.number().optional().describe('最新章节'),
@@ -163,7 +163,7 @@ export function createUpdateSyncTool(ctx: ToolContext) {
 export function createGetStoryCharactersTool(ctx: ToolContext) {
   return {
     description: '获取故事角色矩阵（角色设定、状态、关系）。',
-    parameters: z.object({}),
+    inputSchema: z.object({}),
     execute: async () => {
       const characters = getStoryCharacters(ctx.novelId);
       return { characters, count: characters.length };
@@ -175,7 +175,7 @@ export function createGetStoryCharactersTool(ctx: ToolContext) {
 export function createUpdateStoryCharacterTool(ctx: ToolContext) {
   return {
     description: '更新角色信息。',
-    parameters: z.object({
+    inputSchema: z.object({
       name: z.string().describe('角色名'),
       role: z.string().optional().describe('角色定位'),
       status: z.string().optional().describe('状态'),
@@ -195,7 +195,7 @@ export function createUpdateStoryCharacterTool(ctx: ToolContext) {
 export function createGetSummariesTool(ctx: ToolContext) {
   return {
     description: '获取章节摘要列表。',
-    parameters: z.object({}),
+    inputSchema: z.object({}),
     execute: async () => {
       const summaries = getStorySummaries(ctx.novelId);
       return { summaries, count: summaries.length };
@@ -207,7 +207,7 @@ export function createGetSummariesTool(ctx: ToolContext) {
 export function createUpdateSummaryTool(ctx: ToolContext) {
   return {
     description: '更新章节摘要。',
-    parameters: z.object({
+    inputSchema: z.object({
       chapter: z.number().describe('章节号'),
       title: z.string().optional().describe('章节标题'),
       summary: z.string().optional().describe('摘要'),
@@ -225,7 +225,7 @@ export function createUpdateSummaryTool(ctx: ToolContext) {
 export function createGetStateTool(ctx: ToolContext) {
   return {
     description: '获取当前状态。',
-    parameters: z.object({
+    inputSchema: z.object({
       category: z.string().optional().describe('分类筛选'),
     }),
     execute: async ({ category }: { category?: string }) => {
@@ -239,7 +239,7 @@ export function createGetStateTool(ctx: ToolContext) {
 export function createUpdateStateTool(ctx: ToolContext) {
   return {
     description: '更新当前状态。',
-    parameters: z.object({
+    inputSchema: z.object({
       key: z.string().describe('状态键'),
       value: z.string().describe('状态值'),
       category: z.string().optional().describe('分类'),
@@ -255,7 +255,7 @@ export function createUpdateStateTool(ctx: ToolContext) {
 export function createGetPlotlinesTool(ctx: ToolContext) {
   return {
     description: '获取支线进度。',
-    parameters: z.object({}),
+    inputSchema: z.object({}),
     execute: async () => {
       const plotlines = getStoryPlotlines(ctx.novelId);
       return { plotlines, count: plotlines.length };
@@ -267,7 +267,7 @@ export function createGetPlotlinesTool(ctx: ToolContext) {
 export function createUpdatePlotlineTool(ctx: ToolContext) {
   return {
     description: '更新支线进度。',
-    parameters: z.object({
+    inputSchema: z.object({
       id: z.string().describe('支线ID'),
       name: z.string().describe('支线名称'),
       status: z.string().optional().describe('状态：active/dormant/resolved'),
@@ -286,7 +286,7 @@ export function createUpdatePlotlineTool(ctx: ToolContext) {
 export function createGetResourcesTool(ctx: ToolContext) {
   return {
     description: '获取资源账本。',
-    parameters: z.object({}),
+    inputSchema: z.object({}),
     execute: async () => {
       const resources = getStoryResources(ctx.novelId);
       return { resources, count: resources.length };
@@ -298,7 +298,7 @@ export function createGetResourcesTool(ctx: ToolContext) {
 export function createAddResourceTool(ctx: ToolContext) {
   return {
     description: '添加资源变动记录。',
-    parameters: z.object({
+    inputSchema: z.object({
       chapter: z.number().optional().describe('章节'),
       resource_name: z.string().describe('资源名称'),
       change_type: z.string().optional().describe('变动类型：gain/loss/update'),

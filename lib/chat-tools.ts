@@ -24,7 +24,7 @@ export interface ToolContext {
 export function createGetChapterTool(ctx: ToolContext) {
   return {
     description: '获取指定章节的完整内容。当用户询问某章内容、想看某章、或需要基于某章进行修改时使用。',
-    parameters: z.object({
+    inputSchema: z.object({
       chapterId: z.number().describe('章节编号，如 74'),
     }),
     execute: async ({ chapterId }: { chapterId: number }) => {
@@ -47,7 +47,7 @@ export function createGetChapterTool(ctx: ToolContext) {
 export function createListChaptersTool(ctx: ToolContext) {
   return {
     description: '获取所有章节的列表（标题、字数、状态）。当用户想知道有哪些章节、最新章节、总章数时使用。',
-    parameters: z.object({ _noop: z.string().optional().describe('ignore') }),
+    inputSchema: z.object({ _noop: z.string().optional().describe('ignore') }),
     execute: async () => {
       const chapters = await getChapters(ctx.novelId);
       return {
@@ -66,7 +66,7 @@ export function createListChaptersTool(ctx: ToolContext) {
 export function createSearchChaptersTool(ctx: ToolContext) {
   return {
     description: '搜索章节内容。当用户想查找包含某个关键词、某个人物出现的章节、某个情节在哪章时使用。',
-    parameters: z.object({
+    inputSchema: z.object({
       query: z.string().describe('搜索关键词'),
     }),
     execute: async ({ query }: { query: string }) => {
@@ -87,7 +87,7 @@ export function createSearchChaptersTool(ctx: ToolContext) {
 export function createSaveChapterTool(ctx: ToolContext) {
   return {
     description: '保存/更新章节内容。当用户同意使用 AI 生成或修改的内容替换章节时使用。这是写入操作，会创建版本记录。',
-    parameters: z.object({
+    inputSchema: z.object({
       chapterId: z.number().describe('章节编号'),
       content: z.string().describe('新的章节内容'),
       description: z.string().optional().describe('保存说明，如"AI 重写了开头"'),
@@ -117,7 +117,7 @@ export function createSaveChapterTool(ctx: ToolContext) {
 export function createMarkChapterStatusTool(ctx: ToolContext) {
   return {
     description: '标记章节状态。audit：章节已保存待审计。synced：审计通过且故事数据已入库。',
-    parameters: z.object({
+    inputSchema: z.object({
       chapterId: z.number().describe('章节编号'),
       status: z.enum(['audit', 'synced']).describe('目标状态'),
     }),
@@ -144,7 +144,7 @@ export function createMarkChapterStatusTool(ctx: ToolContext) {
 export function createListCharactersTool(ctx: ToolContext) {
   return {
     description: '获取所有角色列表。当用户询问有哪些角色、角色关系、某个角色的信息时使用。',
-    parameters: z.object({ _noop: z.string().optional().describe('ignore') }),
+    inputSchema: z.object({ _noop: z.string().optional().describe('ignore') }),
     execute: async () => {
       const characters = await getCharacters(ctx.novelId);
       return {
@@ -170,7 +170,7 @@ export function createListCharactersTool(ctx: ToolContext) {
 export function createGetCharacterTool(ctx: ToolContext) {
   return {
     description: '获取指定角色的详细信息。当用户想深入了解某个角色时使用。',
-    parameters: z.object({
+    inputSchema: z.object({
       characterId: z.string().describe('角色 ID'),
     }),
     execute: async ({ characterId }: { characterId: string }) => {
@@ -188,7 +188,7 @@ export function createGetCharacterTool(ctx: ToolContext) {
 export function createListForeshadowingTool(ctx: ToolContext) {
   return {
     description: '获取所有伏笔列表。当用户询问有哪些伏笔、伏笔状态、未回收的伏笔时使用。',
-    parameters: z.object({
+    inputSchema: z.object({
       status: z.enum(['planted', 'progressing', 'resolved', 'all']).optional().describe('按状态筛选'),
     }),
     execute: async ({ status }: { status?: string }) => {
@@ -217,7 +217,7 @@ export function createListForeshadowingTool(ctx: ToolContext) {
 export function createAddForeshadowingTool(ctx: ToolContext) {
   return {
     description: '添加一条伏笔。当用户提出新的伏笔线索、悬念、未解之谜时使用。',
-    parameters: z.object({
+    inputSchema: z.object({
       chapter: z.number().describe('埋设章节号'),
       content: z.string().describe('伏笔内容描述'),
       status: z.enum(['open', 'progressing', 'resolved']).optional().describe('状态，默认 open'),
@@ -237,7 +237,7 @@ export function createAddForeshadowingTool(ctx: ToolContext) {
 export function createUpdateForeshadowingTool(ctx: ToolContext) {
   return {
     description: '更新伏笔状态或内容。当伏笔推进、回收、或需要修改描述时使用。',
-    parameters: z.object({
+    inputSchema: z.object({
       id: z.string().describe('伏笔 ID（hook-xx-xx 格式）'),
       status: z.enum(['open', 'progressing', 'resolved']).optional().describe('新状态'),
       content: z.string().optional().describe('新的内容描述'),
@@ -262,7 +262,7 @@ export function createUpdateForeshadowingTool(ctx: ToolContext) {
 export function createUpdateOutlineTool(ctx: ToolContext) {
   return {
     description: '更新小说大纲。当用户讨论并确认大纲调整时使用。',
-    parameters: z.object({
+    inputSchema: z.object({
       content: z.string().describe('完整的大纲 markdown 内容'),
     }),
     execute: async ({ content }: { content: string }) => {
@@ -283,7 +283,7 @@ export function createUpdateOutlineTool(ctx: ToolContext) {
 export function createAddCharacterTool(ctx: ToolContext) {
   return {
     description: '添加一个新角色。当用户介绍新角色时使用。',
-    parameters: z.object({
+    inputSchema: z.object({
       name: z.string().describe('角色名'),
       role: z.enum(['protagonist', 'antagonist', 'supporting']).describe('角色定位'),
       personality: z.string().optional().describe('性格特征'),
@@ -308,7 +308,7 @@ export function createAddCharacterTool(ctx: ToolContext) {
 export function createUpdateCharacterTool(ctx: ToolContext) {
   return {
     description: '更新已有角色信息。当用户纠正或补充角色设定时使用。',
-    parameters: z.object({
+    inputSchema: z.object({
       name: z.string().describe('角色名（必须已存在）'),
       role: z.enum(['protagonist', 'antagonist', 'supporting']).optional().describe('角色定位'),
       personality: z.string().optional().describe('性格特征'),
@@ -337,7 +337,7 @@ export function createUpdateCharacterTool(ctx: ToolContext) {
 export function createUpdateNovelConfigTool(ctx: ToolContext) {
   return {
     description: '更新小说写作配置。当用户讨论并确认写作规范调整时使用（字数要求、文风规则、禁止写法、核心设定等）。',
-    parameters: z.object({
+    inputSchema: z.object({
       configKey: z.enum(['targetTotalWords', 'minWordsPerChapter', 'maxWordsPerChapter', 'writingStyleRules', 'forbiddenPatterns', 'coreSettings']).describe('配置项'),
       value: z.any().describe('配置值。字数为数字，规则为字符串数组'),
     }),
@@ -360,7 +360,7 @@ export function createUpdateNovelConfigTool(ctx: ToolContext) {
 export function createStyleFromDescriptionTool(ctx: ToolContext) {
   return {
     description: '根据描述创建文风配置。当用户说"参照XX写XX的文风"、"模仿XX风格"等，不需要提供参考文本，直接根据描述生成文风配置。所有参数除 name 和 description 外都有默认值，可以不传。',
-    parameters: z.object({
+    inputSchema: z.object({
       name: z.string().describe('文风配置名称，如"辰东·遮天风格"、"江南·龙族风格"'),
       description: z.string().describe('文风描述，如"辰东写遮天的文风：大气磅礴，短句密集，战斗场面节奏快"'),
       avgSentenceLength: z.number().optional().describe('平均句长（中文字符数），不传则默认 20'),
@@ -398,7 +398,7 @@ export function createStyleFromDescriptionTool(ctx: ToolContext) {
 export function createImportStyleTool(ctx: ToolContext) {
   return {
     description: '导入文风配置。当用户提供参考文本并要求模仿其风格时使用。分析参考文本的句长、词汇、节奏、句式等特征，生成文风指纹并激活。',
-    parameters: z.object({
+    inputSchema: z.object({
       name: z.string().describe('文风配置名称，如"金庸风格"、"余华风格"'),
       referenceText: z.string().describe('参考文本（至少 500 字）'),
     }),
@@ -446,7 +446,7 @@ export function createImportStyleTool(ctx: ToolContext) {
 export function createGetActiveStyleTool(ctx: ToolContext) {
   return {
     description: '获取当前激活的文风配置。',
-    parameters: z.object({ _noop: z.string().optional().describe('ignore') }),
+    inputSchema: z.object({ _noop: z.string().optional().describe('ignore') }),
     execute: async () => {
       const db = getDatabase();
       const row = db.prepare('SELECT * FROM style_profiles WHERE novel_id = ? AND is_active = 1').get(ctx.novelId) as any;
@@ -466,7 +466,7 @@ export function createGetActiveStyleTool(ctx: ToolContext) {
 export function createGetOutlineTool(ctx: ToolContext) {
   return {
     description: '获取小说大纲。当用户询问故事大纲、整体结构、后续走向时使用。',
-    parameters: z.object({ _noop: z.string().optional().describe('ignore') }),
+    inputSchema: z.object({ _noop: z.string().optional().describe('ignore') }),
     execute: async () => {
       const outline = await getOutline();
       return {
@@ -493,7 +493,7 @@ export function createGetOutlineTool(ctx: ToolContext) {
 export function createGetStatsTool(ctx: ToolContext) {
   return {
     description: '获取写作统计数据。当用户询问总字数、章节数、写作进度、平均字数等统计信息时使用。',
-    parameters: z.object({ _noop: z.string().optional().describe('ignore') }),
+    inputSchema: z.object({ _noop: z.string().optional().describe('ignore') }),
     execute: async () => {
       const stats = await getStats();
       return stats;
@@ -506,7 +506,7 @@ export function createGetStatsTool(ctx: ToolContext) {
 export function createGetVersionHistoryTool(ctx: ToolContext) {
   return {
     description: '获取某章节的版本历史。当用户想看修改历史、对比版本、回滚时使用。',
-    parameters: z.object({
+    inputSchema: z.object({
       chapterId: z.number().describe('章节编号'),
       limit: z.number().optional().describe('返回最近几个版本，默认 10'),
     }),
@@ -533,7 +533,7 @@ export function createGetVersionHistoryTool(ctx: ToolContext) {
 export function createGetGitStatusTool(ctx: ToolContext) {
   return {
     description: '获取 Git 仓库状态。当用户询问当前修改、分支状态、是否有未提交的更改时使用。',
-    parameters: z.object({ _noop: z.string().optional().describe('ignore') }),
+    inputSchema: z.object({ _noop: z.string().optional().describe('ignore') }),
     execute: async () => {
       const status = await getGitStatus();
       return {
@@ -552,7 +552,7 @@ export function createGetGitStatusTool(ctx: ToolContext) {
 export function createGetGitLogTool(ctx: ToolContext) {
   return {
     description: '获取 Git 提交历史。当用户想看最近的修改记录、提交历史时使用。',
-    parameters: z.object({
+    inputSchema: z.object({
       limit: z.number().optional().describe('返回最近几条记录，默认 10'),
     }),
     execute: async ({ limit }: { limit?: number }) => {
@@ -573,7 +573,7 @@ export function createGetGitLogTool(ctx: ToolContext) {
 export function createGitCommitTool(ctx: ToolContext) {
   return {
     description: '创建 Git 提交。当用户想保存当前修改到 Git 时使用。会自动暂存所有更改并提交。',
-    parameters: z.object({
+    inputSchema: z.object({
       message: z.string().describe('提交信息'),
     }),
     execute: async ({ message }: { message: string }) => {
@@ -593,7 +593,7 @@ export function createGitCommitTool(ctx: ToolContext) {
 export function createQueryDatabaseTool(ctx: ToolContext) {
   return {
     description: '执行只读 SQL 查询。当用户需要查询复杂的统计数据、跨表关联查询时使用。只允许 SELECT 查询。',
-    parameters: z.object({
+    inputSchema: z.object({
       sql: z.string().describe('SQL SELECT 查询语句'),
     }),
     execute: async ({ sql }: { sql: string }) => {

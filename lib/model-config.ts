@@ -2,6 +2,7 @@ import { ModelConfig, ModelProvider, ModelTestResult, MODEL_PRESETS } from '@/ty
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createDeepSeek } from '@ai-sdk/deepseek';
 import { generateText } from 'ai';
 import { getDatabase } from './database';
 
@@ -143,7 +144,7 @@ export async function updateModelConfig(id: string, updates: Partial<ModelConfig
       provider: updates.provider || 'custom',
       enabled: updates.enabled !== undefined ? updates.enabled : true,
       isDefault: updates.isDefault || false,
-      settings: updates.settings || {},
+      settings: updates.settings || { type: 'custom' as const, apiKey: '', baseURL: '', model: '' },
       createdAt: now,
       updatedAt: now,
     };
@@ -251,11 +252,11 @@ export function createModelInstance(config: ModelConfig) {
     }
 
     case 'deepseek': {
-      const openai = createOpenAI({
+      const deepseek = createDeepSeek({
         baseURL: settings.baseURL || 'https://api.deepseek.com/v1',
         apiKey: settings.apiKey,
       });
-      return openai.chat(settings.model);
+      return deepseek.chat(settings.model);
     }
 
     case 'gemini': {

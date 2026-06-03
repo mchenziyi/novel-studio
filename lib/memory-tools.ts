@@ -15,7 +15,7 @@ import { ToolContext } from './chat-tools';
 export function createSaveMemoryTool(ctx: ToolContext) {
   return {
     description: '保存一条记忆/知识。当用户纠正你、告诉你重要信息、或你从对话中学到东西时使用。这是AI学习的核心机制。',
-    parameters: z.object({
+    inputSchema: z.object({
       category: z.enum(['character', 'world_rule', 'writing_style', 'plot_rule', 'user_preference', 'correction', 'fact'])
         .describe('记忆分类：character=角色设定, world_rule=世界规则, writing_style=写作风格, plot_rule=剧情规则, user_preference=用户偏好, correction=纠正记录, fact=事实'),
       key: z.string().describe('关键词/主题，如"阿渠的性别"、"文风要求"'),
@@ -50,7 +50,7 @@ export function createSaveMemoryTool(ctx: ToolContext) {
 export function createSearchMemoryTool(ctx: ToolContext) {
   return {
     description: '搜索已保存的记忆/知识。当你需要查找之前学过的东西时使用。',
-    parameters: z.object({
+    inputSchema: z.object({
       query: z.string().describe('搜索关键词'),
     }),
     execute: async ({ query }: { query: string }) => {
@@ -73,7 +73,7 @@ export function createSearchMemoryTool(ctx: ToolContext) {
 export function createListMemoriesTool(ctx: ToolContext) {
   return {
     description: '列出所有已保存的记忆/知识。可按分类筛选。',
-    parameters: z.object({
+    inputSchema: z.object({
       category: z.enum(['character', 'world_rule', 'writing_style', 'plot_rule', 'user_preference', 'correction', 'fact', 'all'])
         .optional()
         .describe('按分类筛选，不传则返回全部'),
@@ -103,7 +103,7 @@ export function createListMemoriesTool(ctx: ToolContext) {
 export function createUpdateMemoryTool(ctx: ToolContext) {
   return {
     description: '更新一条已保存的记忆。当信息需要修正时使用。',
-    parameters: z.object({
+    inputSchema: z.object({
       id: z.string().describe('记忆 ID'),
       content: z.string().optional().describe('新的内容'),
       importance: z.number().min(1).max(5).optional().describe('新的重要性'),
@@ -123,7 +123,7 @@ export function createUpdateMemoryTool(ctx: ToolContext) {
 export function createDeleteMemoryTool(ctx: ToolContext) {
   return {
     description: '删除一条记忆。当信息不再有效时使用。',
-    parameters: z.object({
+    inputSchema: z.object({
       id: z.string().describe('记忆 ID'),
     }),
     execute: async ({ id }: { id: string }) => {
