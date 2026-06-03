@@ -110,3 +110,23 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: '更新失败' }, { status: 500 });
   }
 }
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+    const novelId = searchParams.get('novelId') || 'default';
+
+    if (!id) {
+      return NextResponse.json({ error: '缺少 ID' }, { status: 400 });
+    }
+
+    const db = getDatabase();
+    db.prepare('DELETE FROM style_profiles WHERE id = ? AND novel_id = ?').run(id, novelId);
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Failed to delete style profile:', error);
+    return NextResponse.json({ error: '删除失败' }, { status: 500 });
+  }
+}

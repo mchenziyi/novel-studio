@@ -65,6 +65,13 @@ export function StylePanel() {
     } catch (e) { console.error(e); }
   };
 
+  const deleteProfile = async (id: number) => {
+    try {
+      await fetch(`/api/style?id=${id}&novelId=${currentNovelId}`, { method: 'DELETE' });
+      await loadProfiles();
+    } catch (e) { console.error(e); }
+  };
+
   const activeProfile = profiles.find(p => p.isActive);
 
   if (loading) return <div className="text-[13px] text-[#a3a3a3]">加载中...</div>;
@@ -101,14 +108,25 @@ export function StylePanel() {
                   {p.fingerprint?.sentenceLength?.avg || '?'}字/句
                 </span>
               </div>
-              <button
-                onClick={() => toggleActive(p.id, !p.isActive)}
-                className={`px-3 py-1 text-[12px] rounded-lg transition-colors ${
-                  p.isActive ? 'bg-[#171717] text-white' : 'bg-[#f5f5f5] text-[#525252] hover:bg-[#e8e8e8]'
-                }`}
-              >
-                {p.isActive ? '已激活' : '激活'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => toggleActive(p.id, !p.isActive)}
+                  className={`px-3 py-1 text-[12px] rounded-lg transition-colors ${
+                    p.isActive ? 'bg-[#171717] text-white' : 'bg-[#f5f5f5] text-[#525252] hover:bg-[#e8e8e8]'
+                  }`}
+                >
+                  {p.isActive ? '已激活' : '激活'}
+                </button>
+                <button
+                  onClick={() => deleteProfile(p.id)}
+                  className="p-1.5 text-[#a3a3a3] hover:text-[#dc2626] hover:bg-[#fef2f2] rounded-lg transition-colors"
+                  title="删除"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </div>
             </div>
           ))}
         </div>
