@@ -175,6 +175,14 @@ func (h *ChatHandler) SSEChat(c *gin.Context) {
 				"message":   evt.Message,
 				"toolCalls": evt.ToolCalls,
 			})
+
+			// Trigger Learning Agent asynchronously with full conversation
+			fullConvo := append(userMsgs, &schema.Message{
+				Role:    schema.Assistant,
+				Content: evt.Message,
+			})
+			learner := agent.NewLearner(h.DB, modelClient, novelID)
+			learner.AnalyzeAndSave(ctx, fullConvo)
 		}
 	})
 

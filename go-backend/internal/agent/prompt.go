@@ -71,6 +71,13 @@ func BuildSystemPrompt(tctx *ToolContext, chapterID int) string {
 			}
 		}
 	}
+	
+	// Learned insights from Learning Agent
+	learner := &Learner{DB: tctx.DB, Model: nil, NovelID: tctx.NovelID}
+	learnedSection := learner.FormatMemoriesForPrompt()
+	if learnedSection != "" {
+		sb.WriteString(learnedSection)
+	}
 
 	// Chapter context
 	if chapterID > 0 {

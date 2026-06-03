@@ -115,9 +115,11 @@ func (c *ModelClient) ChatStream(ctx context.Context, messages []*schema.Message
 }
 
 func (c *ModelClient) ChatSync(ctx context.Context, messages []*schema.Message, tools []*Tool) (*ChatResult, error) {
-	toolInfos := BuildEinoToolInfos(tools)
-	if err := c.model.BindTools(toolInfos); err != nil {
-		return nil, err
+	if len(tools) > 0 {
+		toolInfos := BuildEinoToolInfos(tools)
+		if err := c.model.BindTools(toolInfos); err != nil {
+			return nil, err
+		}
 	}
 	msg, err := c.model.Generate(ctx, messages)
 	if err != nil {
