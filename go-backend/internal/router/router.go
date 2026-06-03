@@ -31,7 +31,7 @@ func Setup(db *sql.DB) *gin.Engine {
 	// Agent Chat
 	chat := handler.NewChatHandler(db)
 	api.GET("/agent/chat", chat.List)
-	api.POST("/agent/chat", chat.Chat)
+	api.POST("/agent/chat", chat.SSEChat)
 	api.DELETE("/agent/chat/:id", chat.Delete)
 	api.POST("/agent/chat/:id/restore", chat.Restore)
 
