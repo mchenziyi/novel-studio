@@ -116,8 +116,8 @@ func (h *ChapterHandler) Rollback(c *gin.Context) {
 
 // GET /api/chapters/:id/diff
 func (h *ChapterHandler) Diff(c *gin.Context) {
-	fromVer := c.Query("from")   // version ID, or "current"
-	toVer := c.Query("to")       // version ID, or "current"
+	fromVer := c.Query("from")
+	toVer := c.Query("to")
 
 	ch, err := h.Svc.Get(c.Param("id"))
 	if err != nil {
@@ -125,50 +125,37 @@ func (h *ChapterHandler) Diff(c *gin.Context) {
 		return
 	}
 
-	// Resolve left (from) content
 	var leftContent string
 	if fromVer == "" || fromVer == "current" {
 		leftContent = ch.Content
 	} else {
 		ver, err := h.Svc.GetVersion(fromVer)
-		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "版本不存在: " + fromVer})
-			return
-		}
+		if err != nil { c.JSON(http.StatusNotFound, gin.H{"error": "版本不存在"}); return }
 		leftContent = ver.Content
 	}
 
-	// Resolve right (to) content
 	var rightContent string
 	if toVer == "" || toVer == "current" {
 		rightContent = ch.Content
 	} else {
 		ver, err := h.Svc.GetVersion(toVer)
-		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "版本不存在: " + toVer})
-			return
-		}
+		if err != nil { c.JSON(http.StatusNotFound, gin.H{"error": "版本不存在"}); return }
 		rightContent = ver.Content
 	}
 
-	// Compute line-diff
 	leftLines := strings.Split(leftContent, "\n")
 	rightLines := strings.Split(rightContent, "\n")
-	diffBlocks := computeLineDiff(leftLines, rightLines)
+	diffBlocks := computeLineDiffWithCharDiffs(leftLines, rightLines)
 
 	c.JSON(http.StatusOK, gin.H{
-		"left":  leftContent,
-		"right": rightContent,
-		"diff":  diffBlocks,
+		"left":  leftContent, "right": rightContent, "diff": diffBlocks,
 	})
 }
-// computeLineDiff calculates line-level diff blocks using LCS backtracking.
-func computeLineDiff(a, b []string) []map[string]interface{} {
+// computeLineDiffWithCharDiffs: line-level LCS + character-level diffs within modified blocks.
+func computeLineDiffWithCharDiffs(a, b []string) []map[string]interface{} {
 	m, n := len(a), len(b)
 	dp := make([][]int, m+1)
-	for i := range dp {
-		dp[i] = make([]int, n+1)
-	}
+	for i := range dp { dp[i] = make([]int, n+1) }
 	for i := 1; i <= m; i++ {
 		for j := 1; j <= n; j++ {
 			if a[i-1] == b[j-1] {
@@ -181,55 +168,57 @@ func computeLineDiff(a, b []string) []map[string]interface{} {
 		}
 	}
 
-	// Backtrack
 	type op struct{ kind byte; li, ri int }
 	var ops []op
 	i, j := m, n
 	for i > 0 || j > 0 {
-		if i > 0 && j > 0 && a[i-1] == b[j-1] {
-			ops = append(ops, op{'e', i - 1, j - 1})
-			i--; j--
-		} else if j > 0 && (i == 0 || dp[i][j-1] >= dp[i-1][j]) {
-			ops = append(ops, op{'i', -1, j - 1})
-			j--
-		} else {
-			ops = append(ops, op{'d', i - 1, -1})
-			i--
-		}
+		if i > 0 && j > 0 && a[i-1] == b[j-1] { ops = append(ops, op{'e', i-1, j-1}); i--; j-- } else if j > 0 && (i == 0 || dp[i][j-1] >= dp[i-1][j]) { ops = append(ops, op{'i', -1, j-1}); j-- } else { ops = append(ops, op{'d', i-1, -1}); i-- }
 	}
+	for x, y := 0, len(ops)-1; x < y; x, y = x+1, y-1 { ops[x], ops[y] = ops[y], ops[x] }
 
-	// Reverse ops
-	for x, y := 0, len(ops)-1; x < y; x, y = x+1, y-1 {
-		ops[x], ops[y] = ops[y], ops[x]
-	}
-
-	// Merge consecutive same-type into blocks
+	// Merge into blocks
 	var blocks []map[string]interface{}
 	for _, o := range ops {
-		kind := "equal"
-		switch o.kind {
-		case 'd': kind = "delete"
-		case 'i': kind = "insert"
-		}
-		n := len(blocks)
-		if n > 0 && blocks[n-1]["type"] == kind {
-			// Extend existing block
-			b := blocks[n-1]
-			lr := b["leftLines"].([]int)
-			rr := b["rightLines"].([]int)
+		kind := "equal"; switch o.kind { case 'd': kind = "delete"; case 'i': kind = "insert" }
+		if len(blocks) > 0 && blocks[len(blocks)-1]["type"] == kind {
+			b := blocks[len(blocks)-1]
+			lr, rr := b["leftLines"].([]int), b["rightLines"].([]int)
 			if o.li >= 0 { lr[1] = o.li }
 			if o.ri >= 0 { rr[1] = o.ri }
 		} else {
-			// New block
-			blocks = append(blocks, map[string]interface{}{
-				"type":       kind,
-				"leftLines":  []int{o.li, o.li},
-				"rightLines": []int{o.ri, o.ri},
-			})
+			blocks = append(blocks, map[string]interface{}{"type": kind, "leftLines": []int{o.li, o.li}, "rightLines": []int{o.ri, o.ri}})
 		}
 	}
-	if blocks == nil {
-		blocks = []map[string]interface{}{}
+
+	// Add character-level diffs for adjacent delete+insert pairs (modifications)
+	for i := 0; i < len(blocks)-1; i++ {
+		b1, b2 := blocks[i], blocks[i+1]
+		if b1["type"] == "delete" && b2["type"] == "insert" {
+			lr, rr := b1["leftLines"].([]int), b2["rightLines"].([]int)
+			chars := computeCharDiffs(a[lr[0]:lr[1]+1], b[rr[0]:rr[1]+1])
+			b1["charDiffs"] = chars
+		}
 	}
+	if len(blocks) == 0 { blocks = []map[string]interface{}{} }
 	return blocks
+}
+
+// computeCharDiffs: for each pair of old/new lines, find common prefix/suffix
+func computeCharDiffs(oldLines, newLines []string) []map[string]interface{} {
+	var diffs []map[string]interface{}
+	maxPairs := len(oldLines)
+	if len(newLines) < maxPairs { maxPairs = len(newLines) }
+	for i := 0; i < maxPairs; i++ {
+		oldRunes := []rune(oldLines[i])
+		newRunes := []rune(newLines[i])
+		prefix := 0
+		for prefix < len(oldRunes) && prefix < len(newRunes) && oldRunes[prefix] == newRunes[prefix] { prefix++ }
+		suffix := 0
+		for suffix < len(oldRunes)-prefix && suffix < len(newRunes)-prefix && oldRunes[len(oldRunes)-1-suffix] == newRunes[len(newRunes)-1-suffix] { suffix++ }
+		diffs = append(diffs, map[string]interface{}{
+			"oldLine":   i, "newLine": i, "prefixLen": prefix, "suffixLen": suffix,
+			"oldLen":    len(oldRunes), "newLen": len(newRunes),
+		})
+	}
+	return diffs
 }
