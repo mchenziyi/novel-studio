@@ -1,3 +1,4 @@
+import "./style.css"
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { createRouter, createWebHistory } from 'vue-router'
@@ -20,6 +21,17 @@ const routes = [
 
 const router = createRouter({ history: createWebHistory(), routes })
 const pinia = createPinia()
-const app = createApp(App)
-app.use(router).use(pinia).use(naive)
-app.mount('#app')
+
+window.addEventListener('error', (e) => {
+  const el = document.getElementById('app')
+  if (el) el.innerHTML = '<div style="padding:40px;color:red;font-family:monospace"><b>Error:</b> ' + e.message + '</div>'
+})
+
+try {
+  const app = createApp(App)
+  app.use(router).use(pinia).use(naive)
+  app.mount('#app')
+} catch(e: any) {
+  const el = document.getElementById('app')
+  if (el) el.innerHTML = '<div style="padding:40px;color:red"><b>Mount Error:</b> ' + e.message + '</div>'
+}
