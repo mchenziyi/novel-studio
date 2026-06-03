@@ -357,6 +357,44 @@ export function createUpdateNovelConfigTool(ctx: ToolContext) {
 
 // ==================== 文风工具 ====================
 
+export function createStyleFromDescriptionTool(ctx: ToolContext) {
+  return {
+    description: '根据描述创建文风配置。当用户说"参照XX写XX的文风"、"模仿XX风格"等，不需要提供参考文本，直接根据描述生成文风配置。',
+    parameters: z.object({
+      name: z.string().describe('文风配置名称，如"辰东·遮天风格"、"江南·龙族风格"'),
+      description: z.string().describe('文风描述，如"辰东写遮天的文风：大气磅礴，短句密集，战斗场面节奏快"'),
+      avgSentenceLength: z.number().describe('你判断该风格的平均句长（中文字符数），如辰东约 15-20，余华约 25-35'),
+      shortSentenceRatio: z.number().describe('短句（<15字）占比百分比，如辰东约 60-70%'),
+      keyPatterns: z.array(z.string()).describe('该风格的核心句式特征，如 ["短句密集推进", "大场景用长句铺开", "对话简洁有力"]'),
+      forbiddenPatterns: z.array(z.string()).describe('该风格不会出现的写法，如 ["不用心理独白", "不用比喻解释比喻"]'),
+      llmGuide: z.string().describe('给 AI 的文风指南（50字以内），如"短句为主，场景描写要大气磅礴，战斗节奏快，对话简洁有力"'),
+    }),
+    execute: async (params: any) => {
+      const db = getDatabase();
+      const now = new Date().toISOString();
+
+      const fingerprint = {
+        sentenceLength: { avg: params.avgSentenceLength, shortPercent: params.shortSentenceRatio },
+        keyPatterns: params.keyPatterns,
+        forbiddenPatterns: params.forbiddenPatterns,
+        source: 'description',
+      };
+
+      db.prepare('UPDATE style_profiles SET is_active = 0 WHERE novel_id = ?').run(ctx.novelId);
+      db.prepare(`
+        INSERT INTO style_profiles (novel_id, name, fingerprint, llm_guide, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 1, ?, ?)
+      `).run(ctx.novelId, params.name, JSON.stringify(fingerprint), params.llmGuide, now, now);
+
+      return {
+        success: true,
+        name: params.name,
+        message: `已创建文风「${params.name}」并激活。平均句长${params.avgSentenceLength}字，短句${params.shortSentenceRatio}%`,
+      };
+    },
+  };
+}
+
 export function createImportStyleTool(ctx: ToolContext) {
   return {
     description: '导入文风配置。当用户提供参考文本并要求模仿其风格时使用。分析参考文本的句长、词汇、节奏、句式等特征，生成文风指纹并激活。',
@@ -633,6 +671,7 @@ export function createChatAgentTools(novelId: string) {
     updateNovelConfig: createUpdateNovelConfigTool(ctx),
     // 文风工具
     importStyle: createImportStyleTool(ctx),
+    createStyleFromDescription: createStyleFromDescriptionTool(ctx),
     getActiveStyle: createGetActiveStyleTool(ctx),
     // 统计
     getStats: createGetStatsTool(ctx),
