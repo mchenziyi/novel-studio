@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { useNovelStore } from '../../stores/novel'
 
 const route = useRoute()
+const novelStore = useNovelStore()
 const collapsed = ref(false)
+
+onMounted(() => novelStore.loadNovels())
 
 const navItems = [
   { path: '/',              label: '首页',      icon: 'home' },
@@ -42,6 +46,14 @@ const icons: Record<string, string> = {
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><line x1="2" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="1.3"/><line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="1.3"/><line x1="2" y1="12" x2="14" y2="12" stroke="currentColor" stroke-width="1.3"/></svg>
       </button>
       <span v-if="!collapsed" class="ml-2 text-[13px] font-semibold text-[#333] tracking-tight">Novel Studio</span>
+    </div>
+
+    <!-- Novel Selector -->
+    <div v-if="!collapsed" class="px-2 py-2 border-b border-[#e8e8e8]">
+      <select v-model="novelStore.currentNovelId" @change="novelStore.switchNovel(novelStore.currentNovelId)"
+        class="w-full text-[12px] px-2 py-1.5 rounded border border-[#e0e0e0] bg-white text-[#555] outline-none cursor-pointer">
+        <option v-for="n in novelStore.novels" :key="n.id" :value="n.id">{{ n.title }}</option>
+      </select>
     </div>
 
     <!-- Nav -->
