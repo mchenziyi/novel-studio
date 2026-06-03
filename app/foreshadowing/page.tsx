@@ -125,7 +125,7 @@ export default function ForeshadowingPage() {
   return (
     <div className="p-8 max-w-7xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">伏笔追踪</h1>
+        <h1 className="text-[32px] font-semibold text-[#171717] tracking-tight">伏笔追踪</h1>
         <p className="text-gray-500 mt-1">管理和追踪小说中的伏笔、钩子和悬念</p>
       </div>
 

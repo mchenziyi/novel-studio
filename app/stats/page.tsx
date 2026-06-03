@@ -132,7 +132,7 @@ export default function StatsPage() {
   return (
     <div className="p-8 max-w-7xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">写作统计</h1>
+        <h1 className="text-[32px] font-semibold text-[#171717] tracking-tight">写作统计</h1>
         <p className="text-gray-500 mt-1">《开局屠村现场-他们说我疯了》写作数据分析</p>
       </div>
 

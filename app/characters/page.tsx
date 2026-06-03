@@ -65,7 +65,7 @@ export default function CharactersPage() {
 
   return (
     <div className="p-8">
-      <h1 className="text-3xl font-bold mb-8">角色管理</h1>
+      <h1 className="text-[32px] font-semibold text-[#171717] tracking-tight mb-8">角色管理</h1>
 
       {/* 搜索 */}
       <div className="bg-white rounded-lg shadow p-4 mb-6">
