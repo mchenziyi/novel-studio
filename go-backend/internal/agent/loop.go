@@ -8,10 +8,9 @@ import (
 	"log"
 	"strings"
 
-	openai "github.com/sashabaranov/go-openai"
+	"github.com/cloudwego/eino/schema"
 )
 
-// Agent orchestrates the AI conversation with tools and streaming
 type Agent struct {
 	DB        *sql.DB
 	Model     *ModelClient
@@ -21,11 +20,11 @@ type Agent struct {
 	MaxSteps  int
 }
 
-func NewAgent(db *sql.DB, apiKey, baseURL, model, novelID string, chapterID int) *Agent {
-	tctx := &ToolContext{DB: db, NovelID: novelID, AgentID: model}
+func NewAgent(db *sql.DB, model *ModelClient, novelID string, chapterID int) *Agent {
+	tctx := &ToolContext{DB: db, NovelID: novelID, AgentID: model.modelName}
 	return &Agent{
 		DB:        db,
-		Model:     NewModelClient(apiKey, baseURL, model),
+		Model:     model,
 		NovelID:   novelID,
 		ChapterID: chapterID,
 		Tools:     BuildAllTools(tctx),
@@ -51,14 +50,15 @@ type AgentResult struct {
 
 type StreamCallback func(event StreamEvent)
 
-func (a *Agent) Run(ctx context.Context, userMessages []openai.ChatCompletionMessage, cb StreamCallback) *AgentResult {
+func (a *Agent) Run(ctx context.Context, userMessages []*schema.Message, cb StreamCallback) *AgentResult {
 	var toolCallNames []string
 	var fullText strings.Builder
 
 	tctx := &ToolContext{DB: a.DB, NovelID: a.NovelID, AgentID: a.Model.modelName}
 	systemPrompt := BuildSystemPrompt(tctx, a.ChapterID)
-	messages := []openai.ChatCompletionMessage{
-		{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
+
+	messages := []*schema.Message{
+		{Role: schema.System, Content: systemPrompt},
 	}
 	messages = append(messages, userMessages...)
 
@@ -71,7 +71,7 @@ func (a *Agent) Run(ctx context.Context, userMessages []openai.ChatCompletionMes
 			break
 		}
 
-		var toolCalls []openai.ToolCall
+		var toolCalls []schema.ToolCall
 		var stepText strings.Builder
 
 		for chunk := range stream {
@@ -92,7 +92,12 @@ func (a *Agent) Run(ctx context.Context, userMessages []openai.ChatCompletionMes
 			break
 		}
 
-		// Execute tools and inject results as user messages
+		messages = append(messages, &schema.Message{
+			Role:      schema.Assistant,
+			Content:   stepText.String(),
+			ToolCalls: toolCalls,
+		})
+
 		for _, tc := range toolCalls {
 			name := tc.Function.Name
 			toolCallNames = append(toolCallNames, name)
@@ -106,12 +111,13 @@ func (a *Agent) Run(ctx context.Context, userMessages []openai.ChatCompletionMes
 			}
 
 			toolResult := a.executeTool(ctx, name, args)
-
 			cb(StreamEvent{Type: "tool_end", ToolName: name, ToolOutput: truncate(toolResult, 500)})
 
-			messages = append(messages, openai.ChatCompletionMessage{
-				Role:    openai.ChatMessageRoleUser,
-				Content: fmt.Sprintf("[工具调用 %s 结果]: %s", name, toolResult),
+			messages = append(messages, &schema.Message{
+				Role:       schema.Tool,
+				Content:    toolResult,
+				Name:       name,
+				ToolCallID: tc.ID,
 			})
 		}
 		log.Printf("[Agent] After tools: %d messages", len(messages))
@@ -122,12 +128,7 @@ func (a *Agent) Run(ctx context.Context, userMessages []openai.ChatCompletionMes
 		finalText = "模型没有生成回复。请重试或换个方式提问。"
 	}
 
-	cb(StreamEvent{
-		Type:      "done",
-		Message:   finalText,
-		ToolCalls: toolCallNames,
-	})
-
+	cb(StreamEvent{Type: "done", Message: finalText, ToolCalls: toolCallNames})
 	return &AgentResult{Message: finalText, ToolCalls: toolCallNames}
 }
 

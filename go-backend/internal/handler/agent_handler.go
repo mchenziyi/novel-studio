@@ -8,15 +8,16 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/cloudwego/eino/schema"
+
 	"novel-studio-go/internal/agent"
 	"novel-studio-go/internal/models"
 	"novel-studio-go/internal/repository"
 
-	openai "github.com/sashabaranov/go-openai"
 	"github.com/gin-gonic/gin"
 )
 
-// SSEChat handles the POST /api/agent/chat endpoint with full Agent integration
+// SSEChat handles POST /api/agent/chat with Eino-backed Agent
 func (h *ChatHandler) SSEChat(c *gin.Context) {
 	var req models.ChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -55,7 +56,6 @@ func (h *ChatHandler) SSEChat(c *gin.Context) {
 	if modelName == "" {
 		modelName = modelConfig.Name
 	}
-
 	if apiKey == "" {
 		send(gin.H{"type": "error", "error": "模型未配置 API Key"})
 		return
@@ -71,9 +71,13 @@ func (h *ChatHandler) SSEChat(c *gin.Context) {
 	if sessionID == "" {
 		sessionID = fmt.Sprintf("%d-%x", time.Now().UnixMilli(), time.Now().UnixNano()%10000)
 		title := req.Messages[len(req.Messages)-1].Content
-		if len([]rune(title)) > 30 { title = string([]rune(title)[:30]) }
+		if len([]rune(title)) > 30 {
+			title = string([]rune(title)[:30])
+		}
 		chapterIDStr := ""
-		if req.ChapterID > 0 { chapterIDStr = fmt.Sprintf("%04d", req.ChapterID) }
+		if req.ChapterID > 0 {
+			chapterIDStr = fmt.Sprintf("%04d", req.ChapterID)
+		}
 		h.ChatSvc.CreateSession(&models.ChatSession{
 			ID: sessionID, NovelID: novelID, Title: title,
 			ChapterID: chapterIDStr, Context: req.Context, Model: modelConfig.ID,
@@ -87,38 +91,57 @@ func (h *ChatHandler) SSEChat(c *gin.Context) {
 				"model": modelConfig.ID, "context": req.Context, "chapterId": req.ChapterID,
 			})
 			h.ChatSvc.AddMessage(&models.ChatMessage{
-				ID: fmt.Sprintf("%d-%s", time.Now().UnixNano(), "user"),
-				SessionID: sessionID, Role: msg.Role, Content: msg.Content, Metadata: string(meta),
+				ID:        fmt.Sprintf("%d-%s", time.Now().UnixNano(), "user"),
+				SessionID: sessionID,
+				Role:      msg.Role,
+				Content:   msg.Content,
+				Metadata:  string(meta),
 			})
 		}
 	}
 
-	// Build agent
-	ag := agent.NewAgent(h.DB, apiKey, baseURL, modelName, novelID, req.ChapterID)
+	// Create Eino ChatModel via ModelProvider (supports DeepSeek/Gemini/OpenAI)
+	provider := modelConfig.Provider
+	if provider == "" || provider == "custom" {
+		provider = "openai"
+	}
+	mp := agent.NewModelProvider(provider, apiKey, baseURL, modelName)
 
-	// Convert messages to OpenAI format
-	var openaiMsgs []openai.ChatCompletionMessage
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Minute)
+	defer cancel()
+
+	chatModel, err := mp.ChatModel(ctx)
+	if err != nil {
+		send(gin.H{"type": "error", "error": fmt.Sprintf("创建模型失败: %v", err)})
+		return
+	}
+
+	// Create Agent with Eino model client
+	modelClient := agent.NewModelClient(chatModel, modelName)
+	ag := agent.NewAgent(h.DB, modelClient, novelID, req.ChapterID)
+
+	// Convert messages to Eino format
+	var userMsgs []*schema.Message
 	for _, msg := range req.Messages {
 		switch msg.Role {
 		case "user":
-			openaiMsgs = append(openaiMsgs, openai.ChatCompletionMessage{
-				Role: openai.ChatMessageRoleUser, Content: msg.Content,
+			userMsgs = append(userMsgs, &schema.Message{
+				Role:    schema.User,
+				Content: msg.Content,
 			})
 		case "assistant":
-			openaiMsgs = append(openaiMsgs, openai.ChatCompletionMessage{
-				Role: openai.ChatMessageRoleAssistant, Content: msg.Content,
+			userMsgs = append(userMsgs, &schema.Message{
+				Role:    schema.Assistant,
+				Content: msg.Content,
 			})
 		}
 	}
 
 	// Run agent with streaming
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Minute)
-	defer cancel()
-
 	var fullText string
 	var toolCallNames []string
 
-	result := ag.Run(ctx, openaiMsgs, func(evt agent.StreamEvent) {
+	result := ag.Run(ctx, userMsgs, func(evt agent.StreamEvent) {
 		switch evt.Type {
 		case "chunk":
 			fullText += evt.Text
@@ -137,30 +160,34 @@ func (h *ChatHandler) SSEChat(c *gin.Context) {
 				"chapterId": req.ChapterID, "toolCalls": evt.ToolCalls,
 			})
 			h.ChatSvc.AddMessage(&models.ChatMessage{
-				ID: fmt.Sprintf("%d-%s", time.Now().UnixNano(), "assistant"),
-				SessionID: sessionID, Role: "assistant",
-				Content: evt.Message, Metadata: string(meta),
+				ID:        fmt.Sprintf("%d-%s", time.Now().UnixNano(), "assistant"),
+				SessionID: sessionID,
+				Role:      "assistant",
+				Content:   evt.Message,
+				Metadata:  string(meta),
 			})
 			if len([]rune(fullText)) > 20 {
 				h.ChatSvc.UpdateTitle(sessionID, string([]rune(fullText)[:20]))
 			}
 			send(gin.H{
-				"type": "done", "sessionId": sessionID,
-				"message": evt.Message, "toolCalls": evt.ToolCalls,
+				"type":      "done",
+				"sessionId": sessionID,
+				"message":   evt.Message,
+				"toolCalls": evt.ToolCalls,
 			})
 		}
 	})
 
 	if result == nil || fullText == "" {
 		send(gin.H{
-			"type": "done", "sessionId": sessionID,
-			"message": "模型没有生成回复。请重试或换个方式提问。",
+			"type":      "done",
+			"sessionId": sessionID,
+			"message":   "模型没有生成回复。请重试或换个方式提问。",
 			"toolCalls": toolCallNames,
 		})
 	}
 }
 
-// resolveModel finds the active model config
 func (h *ChatHandler) resolveModel(modelID string) *models.ModelConfig {
 	configs, err := repository.GetModelConfigs(h.DB)
 	if err != nil {
@@ -177,7 +204,6 @@ func (h *ChatHandler) resolveModel(modelID string) *models.ModelConfig {
 			}
 		}
 	}
-	// Return first enabled
 	for i := range configs {
 		if configs[i].Enabled {
 			return &configs[i]

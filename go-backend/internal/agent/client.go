@@ -2,61 +2,47 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"io"
+	"log"
 
-	openai "github.com/sashabaranov/go-openai"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
-// ModelClient wraps OpenAI-compatible API for streaming + tool calling
+// ChatModel is the interface Eino ChatModels implement (Stream + Generate + BindTools)
+type ChatModel interface {
+	Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error)
+	Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error)
+	BindTools(tools []*schema.ToolInfo) error
+}
+
+// ModelClient wraps an Eino ChatModel for OpenAI-compatible streaming + tool calling
 type ModelClient struct {
-	client    *openai.Client
+	model     ChatModel
 	modelName string
 }
 
-func NewModelClient(apiKey, baseURL, model string) *ModelClient {
-	cfg := openai.DefaultConfig(apiKey)
-	if baseURL != "" {
-		cfg.BaseURL = baseURL
-	}
-	return &ModelClient{
-		client:    openai.NewClientWithConfig(cfg),
-		modelName: model,
-	}
+func NewModelClient(model ChatModel, modelName string) *ModelClient {
+	return &ModelClient{model: model, modelName: modelName}
 }
+
+func (c *ModelClient) Model() ChatModel { return c.model }
 
 type StreamChunk struct {
 	Text      string
-	ToolCalls []openai.ToolCall
+	ToolCalls []schema.ToolCall
 	IsDone    bool
-	Usage     *openai.Usage
 }
 
-func (c *ModelClient) ChatStream(ctx context.Context, messages []openai.ChatCompletionMessage, tools []*Tool, temperature float32) (<-chan StreamChunk, error) {
+func (c *ModelClient) ChatStream(ctx context.Context, messages []*schema.Message, tools []*Tool, temperature float32) (<-chan StreamChunk, error) {
 	ch := make(chan StreamChunk, 100)
 
-	var openaiTools []openai.Tool
-	for _, t := range tools {
-		schemaBytes, _ := json.Marshal(t.JSONSchema())
-		openaiTools = append(openaiTools, openai.Tool{
-			Type: openai.ToolTypeFunction,
-			Function: &openai.FunctionDefinition{
-				Name:        t.Name,
-				Description: t.Description,
-				Parameters:  json.RawMessage(schemaBytes),
-			},
-		})
+	toolInfos := BuildEinoToolInfos(tools)
+	if err := c.model.BindTools(toolInfos); err != nil {
+		return nil, err
 	}
 
-	req := openai.ChatCompletionRequest{
-		Model:       c.modelName,
-		Messages:    messages,
-		Tools:       openaiTools,
-		Temperature: temperature,
-		Stream:      true,
-	}
-
-	stream, err := c.client.CreateChatCompletionStream(ctx, req)
+	stream, err := c.model.Stream(ctx, messages)
 	if err != nil {
 		return nil, err
 	}
@@ -65,60 +51,55 @@ func (c *ModelClient) ChatStream(ctx context.Context, messages []openai.ChatComp
 		defer close(ch)
 		defer stream.Close()
 
-		var toolCallAccum map[int]*openai.ToolCall
+		var toolCallAccum map[int]*schema.ToolCall
 
 		for {
-			resp, err := stream.Recv()
+			msg, err := stream.Recv()
 			if err == io.EOF {
+				if len(toolCallAccum) > 0 {
+					var tcs []schema.ToolCall
+					for _, tc := range toolCallAccum {
+						tcs = append(tcs, *tc)
+					}
+					ch <- StreamChunk{ToolCalls: tcs}
+				}
 				ch <- StreamChunk{IsDone: true}
 				return
 			}
 			if err != nil {
-				ch <- StreamChunk{Text: "[StreamError: " + err.Error() + "]", IsDone: true}
+				log.Printf("[ModelClient] Stream error: %v", err)
+				ch <- StreamChunk{IsDone: true}
 				return
 			}
-			if len(resp.Choices) == 0 {
-				continue
+
+			if msg.Content != "" {
+				ch <- StreamChunk{Text: msg.Content}
 			}
 
-			delta := resp.Choices[0].Delta
-
-			if delta.Content != "" {
-				ch <- StreamChunk{Text: delta.Content}
-			}
-
-			if len(delta.ToolCalls) > 0 {
+			if len(msg.ToolCalls) > 0 {
 				if toolCallAccum == nil {
-					toolCallAccum = make(map[int]*openai.ToolCall)
+					toolCallAccum = make(map[int]*schema.ToolCall)
 				}
-				for _, tc := range delta.ToolCalls {
-					if tc.Index == nil {
-						continue
+				for i := range msg.ToolCalls {
+					tc := &msg.ToolCalls[i]
+					idx := 0
+					if tc.Index != nil {
+						idx = *tc.Index
 					}
-					if existing, ok := toolCallAccum[*tc.Index]; ok {
+					if existing, ok := toolCallAccum[idx]; ok {
 						if tc.Function.Arguments != "" {
 							existing.Function.Arguments += tc.Function.Arguments
 						}
 					} else {
-						toolCallAccum[*tc.Index] = &openai.ToolCall{
-							ID:   tc.ID,
-							Type: tc.Type,
-							Function: openai.FunctionCall{
-								Name:      tc.Function.Name,
-								Arguments: tc.Function.Arguments,
-							},
-						}
+						copy := *tc
+						toolCallAccum[idx] = &copy
 					}
 				}
 			}
 
-			if resp.Usage != nil {
-				ch <- StreamChunk{Usage: resp.Usage}
-			}
-
-			if len(resp.Choices) > 0 && resp.Choices[0].FinishReason != "" {
+			if msg.ResponseMeta != nil && msg.ResponseMeta.FinishReason != "" {
 				if len(toolCallAccum) > 0 {
-					var tcs []openai.ToolCall
+					var tcs []schema.ToolCall
 					for _, tc := range toolCallAccum {
 						tcs = append(tcs, *tc)
 					}
@@ -133,48 +114,43 @@ func (c *ModelClient) ChatStream(ctx context.Context, messages []openai.ChatComp
 	return ch, nil
 }
 
-// ChatSync non-streaming completion with tools
-func (c *ModelClient) ChatSync(ctx context.Context, messages []openai.ChatCompletionMessage, tools []*Tool, temperature float32) (*ChatResult, error) {
-	var openaiTools []openai.Tool
-	for _, t := range tools {
-		schemaBytes, _ := json.Marshal(t.JSONSchema())
-		openaiTools = append(openaiTools, openai.Tool{
-			Type: openai.ToolTypeFunction,
-			Function: &openai.FunctionDefinition{
-				Name:        t.Name,
-				Description: t.Description,
-				Parameters:  json.RawMessage(schemaBytes),
-			},
-		})
+func (c *ModelClient) ChatSync(ctx context.Context, messages []*schema.Message, tools []*Tool) (*ChatResult, error) {
+	toolInfos := BuildEinoToolInfos(tools)
+	if err := c.model.BindTools(toolInfos); err != nil {
+		return nil, err
 	}
-
-	req := openai.ChatCompletionRequest{
-		Model:       c.modelName,
-		Messages:    messages,
-		Tools:       openaiTools,
-		Temperature: temperature,
-	}
-
-	resp, err := c.client.CreateChatCompletion(ctx, req)
+	msg, err := c.model.Generate(ctx, messages)
 	if err != nil {
 		return nil, err
 	}
-
-	result := &ChatResult{}
-	if len(resp.Choices) > 0 {
-		result.Content = resp.Choices[0].Message.Content
-		if len(resp.Choices[0].Message.ToolCalls) > 0 {
-			result.ToolCalls = resp.Choices[0].Message.ToolCalls
-		}
-	}
-	if resp.Usage.TotalTokens > 0 {
-		result.Usage = &resp.Usage
-	}
-	return result, nil
+	return &ChatResult{Content: msg.Content, ToolCalls: msg.ToolCalls}, nil
 }
 
 type ChatResult struct {
 	Content   string
-	ToolCalls []openai.ToolCall
-	Usage     *openai.Usage
+	ToolCalls []schema.ToolCall
+}
+
+func BuildEinoToolInfos(tools []*Tool) []*schema.ToolInfo {
+	var infos []*schema.ToolInfo
+	for _, t := range tools {
+		info := &schema.ToolInfo{
+			Name: t.Name,
+			Desc: t.Description,
+		}
+		if len(t.Properties) > 0 {
+			params := make(map[string]*schema.ParameterInfo)
+			for name, prop := range t.Properties {
+				params[name] = &schema.ParameterInfo{
+					Type:     schema.DataType(prop.Type),
+					Desc:     prop.Description,
+					Enum:     prop.Enum,
+					Required: contains(t.Required, name),
+				}
+			}
+			info.ParamsOneOf = schema.NewParamsOneOfByParams(params)
+		}
+		infos = append(infos, info)
+	}
+	return infos
 }
