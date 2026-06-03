@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NDropdown, NPopconfirm } from 'naive-ui'
+import { NButton, NPopconfirm } from 'naive-ui'
 import { api } from '../api/client'
 import ChatPanel from '../components/chat/ChatPanel.vue'
 
@@ -14,18 +14,18 @@ const wordCount = ref(0)
 const saving = ref(false)
 const loading = ref(true)
 
-// Version diff state
-const versions = ref<any[]>([])
-const selectedVersion = ref<any>(null)
-const diffLeft = ref('')
-const diffRight = ref('')
+// Version state
+type VerItem = { id: string; source: string; timestamp: string; description: string; num: number }
+const versions = ref<VerItem[]>([])
+const selectedVersion = ref<VerItem | null>(null)
+const prevContent = ref('')
 const diffBlocks = ref<any[]>([])
-const showDiff = ref(false)
 
-// Refs for synced scroll
-const leftPanel = ref<HTMLElement>()
-const rightPanel = ref<HTMLElement>()
-let isSyncing = false
+// Sync scroll refs (both vertical and horizontal)
+const leftScroll = ref<HTMLElement>()
+const rightScroll = ref<HTMLElement>()
+let syncingV = false
+let syncingH = false
 
 async function loadChapter() {
   try {
@@ -33,78 +33,113 @@ async function loadChapter() {
     content.value = chapter.value.content || ''
     wordCount.value = chapter.value.wordCount || 0
     await loadVersions()
-  } catch (e) {
-    // New chapter
-    chapter.value = { id: route.params.id, title: `第${parseInt(route.params.id as string)}章`, wordCount: 0 }
+  } catch (_) {
+    chapter.value = { id: route.params.id, title: `第${parseInt(route.params.id as string)}章` }
     content.value = ''
   }
   loading.value = false
 }
 
 async function loadVersions() {
-  try { versions.value = await api.chapters.history(route.params.id as string) } catch (_) {}
+  try {
+    const raw = await api.chapters.history(route.params.id as string)
+    versions.value = raw.map((v: any, i: number) => ({
+      ...v, num: raw.length - i
+    }))
+    // Auto-select latest previous version for diff
+    if (versions.value.length >= 2) {
+      selectVersion(versions.value[1]) // v[n-1]
+    }
+  } catch (_) {}
 }
 
 async function save() {
+  if (saving.value) return
   saving.value = true
   try {
     wordCount.value = [...content.value].length
-    await api.chapters.update(route.params.id as string, { content: content.value })
+    const updateData = chapter.value.id ? { content: content.value } : {
+      novelId: 'default',
+      title: chapter.value.title || `第${parseInt(route.params.id as string)}章`,
+      content: content.value,
+      number: parseInt(route.params.id as string),
+      file: `${route.params.id as string}.md`
+    }
+    if (chapter.value.id) {
+      await api.chapters.update(route.params.id as string, updateData)
+    } else {
+      await api.chapters.create(updateData)
+    }
+    await loadVersions()
   } catch (_) {}
   saving.value = false
-  await loadVersions()
 }
 
-async function selectVersion(ver: any) {
+async function selectVersion(ver: VerItem) {
   selectedVersion.value = ver
   try {
-    const result = await api.chapters.diff(route.params.id as string, ver.id)
-    diffLeft.value = result.left
-    diffRight.value = result.right
+    // Get diff between selected version (left) and current editor (right)
+    const result = await api.chapters.diff(route.params.id as string, ver.id, 'current')
+    prevContent.value = result.left
     diffBlocks.value = result.diff || []
-    showDiff.value = true
-  } catch (_) {}
-}
-
-function closeDiff() {
-  showDiff.value = false
-  selectedVersion.value = null
+  } catch (_) {
+    prevContent.value = '无法加载版本内容'
+    diffBlocks.value = []
+  }
 }
 
 async function rollback() {
   if (!selectedVersion.value) return
   await api.chapters.rollback(route.params.id as string, selectedVersion.value.id)
-  closeDiff()
-  loading.value = true
-  location.reload()
+  selectedVersion.value = null
+  content.value = prevContent.value
+  wordCount.value = [...prevContent.value].length
+  await loadVersions()
 }
 
-function onLeftScroll() {
-  if (isSyncing || !rightPanel.value) return
-  isSyncing = true
-  rightPanel.value.scrollTop = leftPanel.value!.scrollTop
-  requestAnimationFrame(() => { isSyncing = false })
+// Synced vertical scroll
+function syncV(source: 'left' | 'right') {
+  if (syncingV) return
+  syncingV = true
+  if (source === 'left' && rightScroll.value) {
+    rightScroll.value.scrollTop = leftScroll.value!.scrollTop
+  } else if (source === 'right' && leftScroll.value) {
+    leftScroll.value.scrollTop = rightScroll.value!.scrollTop
+  }
+  requestAnimationFrame(() => { syncingV = false })
 }
 
-function onRightScroll() {
-  if (isSyncing || !leftPanel.value) return
-  isSyncing = true
-  leftPanel.value.scrollTop = rightPanel.value!.scrollTop
-  requestAnimationFrame(() => { isSyncing = false })
+// Synced horizontal scroll
+function syncH(source: 'left' | 'right') {
+  if (syncingH) return
+  syncingH = true
+  if (source === 'left' && rightScroll.value) {
+    rightScroll.value.scrollLeft = leftScroll.value!.scrollLeft
+  } else if (source === 'right' && leftScroll.value) {
+    leftScroll.value.scrollLeft = rightScroll.value!.scrollLeft
+  }
+  requestAnimationFrame(() => { syncingH = false })
 }
 
-function getLineStyle(blockType: string, side: 'left' | 'right'): string {
-  if (blockType === 'equal') return ''
-  if (side === 'left' && blockType === 'delete') return 'bg-red-50'
-  if (side === 'right' && blockType === 'insert') return 'bg-green-50'
+function lineStyle(blockType: string, side: 'left' | 'right'): string {
+  if (blockType === 'delete' && side === 'left') return 'bg-red-100'
+  if (blockType === 'insert' && side === 'right') return 'bg-green-100'
   return ''
 }
 
-// Ctrl+S shortcut
+// Compute left line numbers
+const leftLines = computed(() => {
+  const lines = prevContent.value.split('\n')
+  return lines
+})
+
+// Compute right line numbers  
+const rightLines = computed(() => content.value.split('\n'))
+
+// Ctrl+S
 function onKeydown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-    e.preventDefault()
-    save()
+    e.preventDefault(); save()
   }
 }
 
@@ -114,8 +149,6 @@ onMounted(async () => {
 })
 
 watch(() => route.params.id, loadChapter)
-
-// Watch content for word count
 watch(content, (v) => { wordCount.value = [...v].length })
 </script>
 
@@ -126,82 +159,124 @@ watch(content, (v) => { wordCount.value = [...v].length })
 
   <div v-else class="flex flex-col h-full">
     <!-- Top Bar -->
-    <div class="flex items-center h-12 px-4 border-b border-[#e5e5e5] bg-white shrink-0 gap-3">
-      <button @click="router.back()" class="text-[#666] hover:text-[#1a1a1a] text-sm">← 返回</button>
-      <span class="text-sm font-medium text-[#1a1a1a]">{{ chapter.id }} · {{ chapter.title }}</span>
-      <span class="text-xs text-[#999]">{{ wordCount }}字</span>
+    <div class="flex items-center h-11 px-3 border-b border-[#e5e5e5] bg-white shrink-0 gap-2 text-sm">
+      <button @click="router.back()" class="text-[#666] hover:text-[#1a1a1a]">←</button>
+      <span class="font-medium text-[#1a1a1a]">{{ chapter.id }}</span>
+      <span class="text-[#666]">{{ chapter.title }}</span>
+      <span class="text-xs text-[#999] ml-1">{{ wordCount }}字</span>
       <div class="flex-1" />
-      <NDropdown trigger="click" :options="versions.map((v) => ({
-        label: `${v.id} · ${v.source}`,
-        key: v.id,
-        props: { onClick: () => selectVersion(v) }
-      }))">
-        <NButton size="tiny" :disabled="versions.length === 0">版本 ▾</NButton>
-      </NDropdown>
-      <NButton size="tiny" type="primary" @click="save" :loading="saving" :disabled="!showDiff">保存</NButton>
+      <span v-if="selectedVersion" class="text-xs text-[#999]">
+        对比: v{{ selectedVersion.num }}
+        <button @click="selectedVersion = null; prevContent = ''; diffBlocks = []" class="ml-1 text-[#666] hover:text-[#1a1a1a]">✕</button>
+      </span>
+      <NButton size="tiny" @click="save" :loading="saving" :disabled="!content">保存</NButton>
     </div>
 
-    <!-- Main Content -->
-    <div class="flex-1 flex flex-col min-h-0">
-      <!-- Diff Mode -->
-      <div v-if="showDiff" class="flex-1 flex min-h-0">
-        <!-- Left: selected version -->
-        <div class="w-1/2 border-r border-[#e5e5e5] flex flex-col">
-          <div class="h-8 px-3 flex items-center text-xs text-[#666] bg-[#fafafa] border-b border-[#e5e5e5] shrink-0">
-            ← {{ selectedVersion?.id }} · {{ selectedVersion?.source }}
-          </div>
-          <div ref="leftPanel" class="flex-1 overflow-auto font-mono text-sm leading-6 p-3 bg-white"
-            @scroll="onLeftScroll"
-          >
-            <div v-for="(block, bi) in diffBlocks" :key="'l'+bi">
-              <div v-if="block.type !== 'insert'"
-                v-for="(line, li) in diffLeft.split('\n').slice(block.leftLines[0], block.leftLines[1] + 1)"
-                :key="'ll'+bi+'-'+li"
-                :class="['px-2', getLineStyle(block.type, 'left')]"
-              >{{ line || ' ' }}</div>
-            </div>
-          </div>
-          <div class="h-10 px-3 flex items-center border-t border-[#e5e5e5] bg-[#fafafa] shrink-0">
-            <NPopconfirm @positive-click="rollback">
-              <template #trigger><NButton size="tiny" type="error" ghost>还原到此版本</NButton></template>
-              确定还原到 {{ selectedVersion?.id }}？当前内容将被覆盖。
-            </NPopconfirm>
-            <div class="flex-1" />
-            <NButton size="tiny" @click="closeDiff">✕ 关闭对比</NButton>
-          </div>
+    <!-- Diff/Editor area -->
+    <div class="flex-1 flex min-h-0">
+      <!-- Left: previous version or editor -->
+      <div class="w-1/2 border-r border-[#e5e5e5] flex flex-col">
+        <div class="h-7 px-3 flex items-center text-xs text-[#999] bg-[#fafafa] border-b border-[#e5e5e5] shrink-0 font-mono">
+          <span v-if="selectedVersion">← v{{ selectedVersion.num }} · {{ selectedVersion.source }} · {{ selectedVersion.timestamp?.slice(0,10) }}</span>
+          <span v-else>编辑区</span>
+          <span class="ml-auto">{{ prevContent ? leftLines.length + ' 行' : '' }}</span>
         </div>
-
-        <!-- Right: current version -->
-        <div class="w-1/2 flex flex-col">
-          <div class="h-8 px-3 flex items-center text-xs text-[#666] bg-[#fafafa] border-b border-[#e5e5e5] shrink-0">
-            v当前 · 最新
-          </div>
-          <div ref="rightPanel" class="flex-1 overflow-auto font-mono text-sm leading-6 p-3 bg-white"
-            @scroll="onRightScroll"
-          >
-            <div v-for="(block, bi) in diffBlocks" :key="'r'+bi">
-              <div v-if="block.type !== 'delete'"
-                v-for="(line, li) in diffRight.split('\n').slice(block.rightLines[0], block.rightLines[1] + 1)"
-                :key="'rl'+bi+'-'+li"
-                :class="['px-2', getLineStyle(block.type, 'right')]"
-              >{{ line || ' ' }}</div>
-            </div>
-          </div>
+        <div 
+          v-if="selectedVersion"
+          ref="leftScroll" 
+          class="flex-1 overflow-auto font-mono text-sm bg-white" 
+          @scroll="syncV('left'); syncH('left')"
+        >
+          <table class="w-max min-w-full">
+            <tbody>
+              <template v-for="(block, bi) in diffBlocks" :key="'l'+bi">
+                <template v-if="block.type !== 'insert'">
+                  <tr v-for="li in (block.leftLines[1] - block.leftLines[0] + 1)" :key="'ll'+bi+'-'+li"
+                    :class="lineStyle(block.type, 'left')"
+                  >
+                    <td class="text-xs text-[#bbb] text-right pr-2 pl-1 select-none w-10 leading-6 align-top">
+                      {{ block.leftLines[0] + li }}
+                    </td>
+                    <td class="pr-2 leading-6 whitespace-pre-wrap break-all">
+                      {{ (leftLines[block.leftLines[0] + li - 1] || ' ') }}
+                    </td>
+                  </tr>
+                </template>
+              </template>
+            </tbody>
+          </table>
         </div>
-      </div>
-
-      <!-- Editor Mode -->
-      <div v-else class="flex-1 overflow-auto p-4">
         <textarea
+          v-else
           v-model="content"
-          class="w-full h-full min-h-[500px] resize-none border-0 outline-none text-sm leading-7 font-serif text-[#1a1a1a] bg-transparent p-0"
+          class="flex-1 resize-none border-0 outline-none text-sm leading-6 font-serif text-[#1a1a1a] bg-transparent p-3"
           placeholder="开始写作..."
           spellcheck="false"
         />
       </div>
 
-      <!-- Chat Panel -->
-      <div class="h-[240px] border-t border-[#e5e5e5] bg-white shrink-0">
+      <!-- Right: current editor -->
+      <div class="w-1/2 flex flex-col">
+        <div class="h-7 px-3 flex items-center text-xs text-[#999] bg-[#fafafa] border-b border-[#e5e5e5] shrink-0 font-mono">
+          <span>当前版本</span>
+          <span class="ml-auto">{{ rightLines.length }} 行</span>
+        </div>
+        <div 
+          v-if="selectedVersion"
+          ref="rightScroll"
+          class="flex-1 overflow-auto font-mono text-sm bg-white" 
+          @scroll="syncV('right'); syncH('right')"
+        >
+          <table class="w-max min-w-full">
+            <tbody>
+              <template v-for="(block, bi) in diffBlocks" :key="'r'+bi">
+                <template v-if="block.type !== 'delete'">
+                  <tr v-for="ri in (block.rightLines[1] - block.rightLines[0] + 1)" :key="'rl'+bi+'-'+ri"
+                    :class="lineStyle(block.type, 'right')"
+                  >
+                    <td class="text-xs text-[#bbb] text-right pr-2 pl-1 select-none w-10 leading-6 align-top">
+                      {{ block.rightLines[0] + ri }}
+                    </td>
+                    <td class="pr-2 leading-6 whitespace-pre-wrap break-all">
+                      {{ rightLines[block.rightLines[0] + ri - 1] || ' ' }}
+                    </td>
+                  </tr>
+                </template>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <textarea
+          v-else
+          v-model="content"
+          class="flex-1 resize-none border-l-0 border-0 outline-none text-sm leading-6 font-serif text-[#1a1a1a] bg-transparent p-3"
+          placeholder="开始写作..."
+          spellcheck="false"
+        />
+      </div>
+    </div>
+
+    <!-- Bottom: Version list + Rollback + Chat -->
+    <div class="border-t border-[#e5e5e5] bg-white shrink-0">
+      <!-- Version bar -->
+      <div class="flex items-center h-8 px-3 border-b border-[#e5e5e5] bg-[#fafafa] gap-1 overflow-x-auto">
+        <span class="text-xs text-[#999] mr-1">历史版本:</span>
+        <button v-for="ver in versions" :key="ver.id"
+          @click="selectVersion(ver)"
+          class="text-xs px-1.5 py-0.5 rounded border hover:bg-white shrink-0"
+          :class="selectedVersion?.id === ver.id ? 'bg-white border-[#999] text-[#1a1a1a] font-medium' : 'border-transparent text-[#666]'"
+        >
+          v{{ ver.num }}
+        </button>
+        <div class="flex-1" />
+        <NPopconfirm v-if="selectedVersion" @positive-click="rollback">
+          <template #trigger><NButton size="tiny" type="error" ghost>还原到 v{{ selectedVersion.num }}</NButton></template>
+          确定还原？当前内容将被覆盖。
+        </NPopconfirm>
+      </div>
+
+      <!-- Chat -->
+      <div class="h-[200px]">
         <ChatPanel :chapter-id="parseInt(route.params.id as string)" />
       </div>
     </div>
