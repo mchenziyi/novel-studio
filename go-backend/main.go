@@ -31,17 +31,26 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to embed frontend: %v", err)
 	}
+	fileServer := http.FileServer(http.FS(distFS))
+
 	r.NoRoute(func(c *gin.Context) {
-		if c.Request.Method == "GET" && c.Request.URL.Path != "" {
-			f, err := distFS.Open(c.Request.URL.Path[1:])
+		path := c.Request.URL.Path
+		// Serve static assets via file server
+		if path != "/" && path != "/index.html" {
+			f, err := distFS.Open(path[1:])
 			if err == nil {
-				defer f.Close()
-				http.FileServer(http.FS(distFS)).ServeHTTP(c.Writer, c.Request)
+				f.Close()
+				fileServer.ServeHTTP(c.Writer, c.Request)
 				return
 			}
 		}
-		// SPA fallback: serve index.html
-		c.FileFromFS("/", http.FS(distFS))
+		// SPA fallback: read and serve index.html content directly
+		data, err := fs.ReadFile(distFS, "index.html")
+		if err != nil {
+			c.Status(404)
+			return
+		}
+		c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 	})
 
 	log.Printf("Novel Studio starting on :%s", cfg.Port)
