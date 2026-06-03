@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
 
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -33,8 +32,6 @@ type StreamChunk struct {
 	Usage     *openai.Usage
 }
 
-// ChatStream sends messages to the model and returns a channel of streaming chunks.
-// The channel emits text chunks, tool call deltas, and a final done marker.
 func (c *ModelClient) ChatStream(ctx context.Context, messages []openai.ChatCompletionMessage, tools []*Tool, temperature float32) (<-chan StreamChunk, error) {
 	ch := make(chan StreamChunk, 100)
 
@@ -80,29 +77,30 @@ func (c *ModelClient) ChatStream(ctx context.Context, messages []openai.ChatComp
 				ch <- StreamChunk{Text: "[StreamError: " + err.Error() + "]", IsDone: true}
 				return
 			}
-
 			if len(resp.Choices) == 0 {
 				continue
 			}
+
 			delta := resp.Choices[0].Delta
 
-			// Handle tool calls in delta
+			if delta.Content != "" {
+				ch <- StreamChunk{Text: delta.Content}
+			}
+
 			if len(delta.ToolCalls) > 0 {
 				if toolCallAccum == nil {
 					toolCallAccum = make(map[int]*openai.ToolCall)
 				}
 				for _, tc := range delta.ToolCalls {
-					idx := tc.Index
-					if idx == nil {
+					if tc.Index == nil {
 						continue
 					}
-					if existing, ok := toolCallAccum[*idx]; ok {
+					if existing, ok := toolCallAccum[*tc.Index]; ok {
 						if tc.Function.Arguments != "" {
 							existing.Function.Arguments += tc.Function.Arguments
 						}
 					} else {
-						log.Printf("[Client] New TC: idx=%d id=%q name=%s", *idx, tc.ID, tc.Function.Name)
-						toolCallAccum[*idx] = &openai.ToolCall{
+						toolCallAccum[*tc.Index] = &openai.ToolCall{
 							ID:   tc.ID,
 							Type: tc.Type,
 							Function: openai.FunctionCall{
@@ -114,21 +112,11 @@ func (c *ModelClient) ChatStream(ctx context.Context, messages []openai.ChatComp
 				}
 			}
 
-			// Handle text content
-			if delta.Content != "" {
-				ch <- StreamChunk{Text: delta.Content}
-			}
-
-			// Final usage
 			if resp.Usage != nil {
 				ch <- StreamChunk{Usage: resp.Usage}
 			}
 
-			// Check finish reason
 			if len(resp.Choices) > 0 && resp.Choices[0].FinishReason != "" {
-				reason := resp.Choices[0].FinishReason
-				log.Printf("[Client] Finish: %s, toolCalls: %d", reason, len(toolCallAccum))
-				// Emit any accumulated tool calls
 				if len(toolCallAccum) > 0 {
 					var tcs []openai.ToolCall
 					for _, tc := range toolCallAccum {

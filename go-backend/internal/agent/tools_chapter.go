@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"novel-studio-go/internal/models"
 	"novel-studio-go/internal/repository"
@@ -539,3 +540,6 @@ func intArg(args map[string]any, key string, def int) int {
 var _ = sql.NullString{}
 var _ = strings.Index
 var _ = fmt.Sprintf
+
+func countRunes(text string) int { return len([]rune(text)) }
+func timeNow() int64              { return time.Now().UnixMilli() }
