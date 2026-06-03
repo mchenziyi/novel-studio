@@ -231,14 +231,26 @@ export async function POST(request: NextRequest) {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'chunk', text: chunk })}\n\n`));
           }
 
-          // 从流结果中获取工具调用
-          const toolCalls = await result.toolCalls;
-          const toolCallNames = toolCalls?.map((tc: any) => tc.toolName) || [];
+          // 从流结果中获取工具调用（streamText 的属性需要 await）
+          let toolCallNames: string[] = [];
+          let toolResults: any[] = [];
+          try {
+            const toolCalls = await result.toolCalls;
+            toolCallNames = toolCalls?.map((tc: any) => tc.toolName) || [];
+          } catch (e) {
+            console.error('Failed to get toolCalls:', e);
+          }
 
-          // 获取工具结果
-          const toolResults: any[] = [];
-          for (const step of result.steps || []) {
-            if (step.toolResults) toolResults.push(...step.toolResults);
+          // 尝试获取工具结果（steps 可能不可用）
+          try {
+            const steps = await result.steps;
+            if (Array.isArray(steps)) {
+              for (const step of steps) {
+                if (step.toolResults) toolResults.push(...step.toolResults);
+              }
+            }
+          } catch (e) {
+            // steps 可能不可用，忽略
           }
 
           // 发送完成事件（包含元数据）
