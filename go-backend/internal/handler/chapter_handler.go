@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"net/http"
+	"strings"
 
 	"novel-studio-go/internal/models"
 	"novel-studio-go/internal/service"
@@ -115,17 +116,120 @@ func (h *ChapterHandler) Rollback(c *gin.Context) {
 
 // GET /api/chapters/:id/diff
 func (h *ChapterHandler) Diff(c *gin.Context) {
-	v1 := c.Query("from")
-	v2 := c.Query("to")
-	// Simple diff: return both versions
-	ver1, err := h.Svc.GetVersions(c.Param("id"), 100)
-	if err != nil || len(ver1) < 2 {
-		c.JSON(http.StatusOK, gin.H{"diff": "需要至少两个版本"})
+	fromVer := c.Query("from")   // version ID, or "current"
+	toVer := c.Query("to")       // version ID, or "current"
+
+	ch, err := h.Svc.Get(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "章节不存在"})
 		return
 	}
+
+	// Resolve left (from) content
+	var leftContent string
+	if fromVer == "" || fromVer == "current" {
+		leftContent = ch.Content
+	} else {
+		ver, err := h.Svc.GetVersion(fromVer)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "版本不存在: " + fromVer})
+			return
+		}
+		leftContent = ver.Content
+	}
+
+	// Resolve right (to) content
+	var rightContent string
+	if toVer == "" || toVer == "current" {
+		rightContent = ch.Content
+	} else {
+		ver, err := h.Svc.GetVersion(toVer)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "版本不存在: " + toVer})
+			return
+		}
+		rightContent = ver.Content
+	}
+
+	// Compute line-diff
+	leftLines := strings.Split(leftContent, "\n")
+	rightLines := strings.Split(rightContent, "\n")
+	diffBlocks := computeLineDiff(leftLines, rightLines)
+
 	c.JSON(http.StatusOK, gin.H{
-		"from":    v1,
-		"to":      v2,
-		"current": ver1[0].Content,
+		"left":  leftContent,
+		"right": rightContent,
+		"diff":  diffBlocks,
 	})
+}
+// computeLineDiff calculates line-level diff blocks using LCS backtracking.
+func computeLineDiff(a, b []string) []map[string]interface{} {
+	m, n := len(a), len(b)
+	dp := make([][]int, m+1)
+	for i := range dp {
+		dp[i] = make([]int, n+1)
+	}
+	for i := 1; i <= m; i++ {
+		for j := 1; j <= n; j++ {
+			if a[i-1] == b[j-1] {
+				dp[i][j] = dp[i-1][j-1] + 1
+			} else if dp[i-1][j] > dp[i][j-1] {
+				dp[i][j] = dp[i-1][j]
+			} else {
+				dp[i][j] = dp[i][j-1]
+			}
+		}
+	}
+
+	// Backtrack
+	type op struct{ kind byte; li, ri int }
+	var ops []op
+	i, j := m, n
+	for i > 0 || j > 0 {
+		if i > 0 && j > 0 && a[i-1] == b[j-1] {
+			ops = append(ops, op{'e', i - 1, j - 1})
+			i--; j--
+		} else if j > 0 && (i == 0 || dp[i][j-1] >= dp[i-1][j]) {
+			ops = append(ops, op{'i', -1, j - 1})
+			j--
+		} else {
+			ops = append(ops, op{'d', i - 1, -1})
+			i--
+		}
+	}
+
+	// Reverse ops
+	for x, y := 0, len(ops)-1; x < y; x, y = x+1, y-1 {
+		ops[x], ops[y] = ops[y], ops[x]
+	}
+
+	// Merge consecutive same-type into blocks
+	var blocks []map[string]interface{}
+	for _, o := range ops {
+		kind := "equal"
+		switch o.kind {
+		case 'd': kind = "delete"
+		case 'i': kind = "insert"
+		}
+		n := len(blocks)
+		if n > 0 && blocks[n-1]["type"] == kind {
+			// Extend existing block
+			b := blocks[n-1]
+			lr := b["leftLines"].([]int)
+			rr := b["rightLines"].([]int)
+			if o.li >= 0 { lr[1] = o.li }
+			if o.ri >= 0 { rr[1] = o.ri }
+		} else {
+			// New block
+			blocks = append(blocks, map[string]interface{}{
+				"type":       kind,
+				"leftLines":  []int{o.li, o.li},
+				"rightLines": []int{o.ri, o.ri},
+			})
+		}
+	}
+	if blocks == nil {
+		blocks = []map[string]interface{}{}
+	}
+	return blocks
 }

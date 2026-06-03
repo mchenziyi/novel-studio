@@ -105,6 +105,10 @@ func (s *ChapterService) GetVersions(chapterID string, limit int) ([]models.Chap
 	return repository.GetChapterVersions(s.DB, chapterID, limit)
 }
 
+func (s *ChapterService) GetVersion(id string) (*models.ChapterVersion, error) {
+	return repository.GetChapterVersion(s.DB, id)
+}
+
 func (s *ChapterService) Rollback(chapterID string, versionID string) error {
 	ver, err := repository.GetChapterVersion(s.DB, versionID)
 	if err != nil {
