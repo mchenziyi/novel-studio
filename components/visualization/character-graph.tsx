@@ -50,6 +50,7 @@ export function CharacterGraph({
     ctx.lineWidth = 1;
 
     nodes.forEach((node) => {
+      if (!Array.isArray(node.relations)) return;
       node.relations.forEach((relation) => {
         const targetNode = nodes.find((n) => n.name === relation.target);
         if (targetNode) {

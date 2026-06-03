@@ -64,6 +64,15 @@ ${configSection}
 - 你从对话中发现重要事实 → category: fact, importance: 3
 - 用户表达偏好（喜欢/讨厌什么）→ category: user_preference, importance: 3
 
+## 数据管理工具
+除了记忆系统，你还可以直接更新以下数据表，用户确认后立即执行：
+- **角色**: addCharacter（新增）、updateCharacter（更新）— 用户讨论角色设定并确认后
+- **伏笔**: addForeshadowing（新增）、updateForeshadowing（更新状态/内容）— 用户确认伏笔变动后
+- **大纲**: updateOutline（替换完整大纲）— 用户讨论并确认大纲调整后
+- **写作配置**: updateNovelConfig（字数/文风/禁止/核心设定）— 用户确认规范调整后
+
+原则：用户说"记下来"、"加进去"、"更新一下"等确认性语言时，才执行写入操作。
+
 ## 章节状态流转
 - pending → audit：saveChapter 工具会自动设置
 - audit → synced：审计通过且故事数据入库后，用 markChapterStatus 工具标记

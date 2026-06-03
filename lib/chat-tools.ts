@@ -212,6 +212,149 @@ export function createListForeshadowingTool(ctx: ToolContext) {
   };
 }
 
+// ==================== 伏笔写入工具 ====================
+
+export function createAddForeshadowingTool(ctx: ToolContext) {
+  return {
+    description: '添加一条伏笔。当用户提出新的伏笔线索、悬念、未解之谜时使用。',
+    parameters: z.object({
+      chapter: z.number().describe('埋设章节号'),
+      content: z.string().describe('伏笔内容描述'),
+      status: z.enum(['open', 'progressing', 'resolved']).optional().describe('状态，默认 open'),
+    }),
+    execute: async ({ chapter, content, status }: { chapter: number; content: string; status?: string }) => {
+      const db = getDatabase();
+      const id = `hook-${chapter}-auto-${Date.now().toString(36)}`;
+      db.prepare(`
+        INSERT INTO story_hooks (id, novel_id, chapter, type, content, status, updated_at)
+        VALUES (?, ?, ?, 'planted', ?, ?, ?)
+      `).run(id, ctx.novelId, chapter, content, status || 'open', new Date().toISOString());
+      return { success: true, id, message: `已添加伏笔：${content.substring(0, 50)}` };
+    },
+  };
+}
+
+export function createUpdateForeshadowingTool(ctx: ToolContext) {
+  return {
+    description: '更新伏笔状态或内容。当伏笔推进、回收、或需要修改描述时使用。',
+    parameters: z.object({
+      id: z.string().describe('伏笔 ID（hook-xx-xx 格式）'),
+      status: z.enum(['open', 'progressing', 'resolved']).optional().describe('新状态'),
+      content: z.string().optional().describe('新的内容描述'),
+    }),
+    execute: async ({ id, status, content }: { id: string; status?: string; content?: string }) => {
+      const db = getDatabase();
+      const fields: string[] = [];
+      const values: any[] = [];
+      if (status) { fields.push('status = ?'); values.push(status); }
+      if (content) { fields.push('content = ?'); values.push(content); }
+      fields.push('updated_at = ?'); values.push(new Date().toISOString());
+      values.push(id); values.push(ctx.novelId);
+      const result = db.prepare(`UPDATE story_hooks SET ${fields.join(', ')} WHERE id = ? AND novel_id = ?`).run(...values);
+      if (result.changes === 0) return { error: `伏笔 ${id} 不存在` };
+      return { success: true, message: `伏笔 ${id} 已更新` };
+    },
+  };
+}
+
+// ==================== 大纲写入工具 ====================
+
+export function createUpdateOutlineTool(ctx: ToolContext) {
+  return {
+    description: '更新小说大纲。当用户讨论并确认大纲调整时使用。',
+    parameters: z.object({
+      content: z.string().describe('完整的大纲 markdown 内容'),
+    }),
+    execute: async ({ content }: { content: string }) => {
+      const db = getDatabase();
+      const now = new Date().toISOString();
+      db.prepare(`
+        INSERT INTO outline (id, novel_id, content, updated_at)
+        VALUES ('main', ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET content = ?, updated_at = ?
+      `).run(ctx.novelId, content, now, content, now);
+      return { success: true, message: '大纲已更新', length: content.length };
+    },
+  };
+}
+
+// ==================== 角色写入工具 ====================
+
+export function createAddCharacterTool(ctx: ToolContext) {
+  return {
+    description: '添加一个新角色。当用户介绍新角色时使用。',
+    parameters: z.object({
+      name: z.string().describe('角色名'),
+      role: z.enum(['protagonist', 'antagonist', 'supporting']).describe('角色定位'),
+      personality: z.string().optional().describe('性格特征'),
+      speakingStyle: z.string().optional().describe('说话风格'),
+      currentState: z.string().optional().describe('当前状态'),
+    }),
+    execute: async (params: any) => {
+      const db = getDatabase();
+      db.prepare(`
+        INSERT INTO story_characters (novel_id, name, role, personality, speaking_style, current_state, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(novel_id, name) DO UPDATE SET role = ?, personality = ?, speaking_style = ?, current_state = ?, updated_at = ?
+      `).run(
+        ctx.novelId, params.name, params.role, params.personality || '', params.speakingStyle || '', params.currentState || '', new Date().toISOString(),
+        params.role, params.personality || '', params.speakingStyle || '', params.currentState || '', new Date().toISOString()
+      );
+      return { success: true, message: `角色「${params.name}」已添加/更新` };
+    },
+  };
+}
+
+export function createUpdateCharacterTool(ctx: ToolContext) {
+  return {
+    description: '更新已有角色信息。当用户纠正或补充角色设定时使用。',
+    parameters: z.object({
+      name: z.string().describe('角色名（必须已存在）'),
+      role: z.enum(['protagonist', 'antagonist', 'supporting']).optional().describe('角色定位'),
+      personality: z.string().optional().describe('性格特征'),
+      speakingStyle: z.string().optional().describe('说话风格'),
+      currentState: z.string().optional().describe('当前状态'),
+    }),
+    execute: async (params: any) => {
+      const db = getDatabase();
+      const existing = db.prepare('SELECT name FROM story_characters WHERE name = ? AND novel_id = ?').get(params.name, ctx.novelId);
+      if (!existing) return { error: `角色「${params.name}」不存在，请用 addCharacter 添加` };
+      const fields: string[] = []; const values: any[] = [];
+      if (params.role) { fields.push('role = ?'); values.push(params.role); }
+      if (params.personality) { fields.push('personality = ?'); values.push(params.personality); }
+      if (params.speakingStyle) { fields.push('speaking_style = ?'); values.push(params.speakingStyle); }
+      if (params.currentState) { fields.push('current_state = ?'); values.push(params.currentState); }
+      fields.push('updated_at = ?'); values.push(new Date().toISOString());
+      values.push(params.name); values.push(ctx.novelId);
+      db.prepare(`UPDATE story_characters SET ${fields.join(', ')} WHERE name = ? AND novel_id = ?`).run(...values);
+      return { success: true, message: `角色「${params.name}」已更新` };
+    },
+  };
+}
+
+// ==================== 小说配置工具 ====================
+
+export function createUpdateNovelConfigTool(ctx: ToolContext) {
+  return {
+    description: '更新小说写作配置。当用户讨论并确认写作规范调整时使用（字数要求、文风规则、禁止写法、核心设定等）。',
+    parameters: z.object({
+      configKey: z.enum(['targetTotalWords', 'minWordsPerChapter', 'maxWordsPerChapter', 'writingStyleRules', 'forbiddenPatterns', 'coreSettings']).describe('配置项'),
+      value: z.any().describe('配置值。字数为数字，规则为字符串数组'),
+    }),
+    execute: async ({ configKey, value }: { configKey: string; value: any }) => {
+      const db = getDatabase();
+      const now = new Date().toISOString();
+      const serialized = JSON.stringify(value);
+      db.prepare(`
+        INSERT INTO novel_configs (novel_id, config_key, config_value, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(novel_id, config_key) DO UPDATE SET config_value = ?, updated_at = ?
+      `).run(ctx.novelId, configKey, serialized, now, serialized, now);
+      return { success: true, message: `写作配置「${configKey}」已更新` };
+    },
+  };
+}
+
 // ==================== 大纲工具 ====================
 
 export function createGetOutlineTool(ctx: ToolContext) {
@@ -409,10 +552,17 @@ export function createChatAgentTools(novelId: string) {
     // 角色（数据库）
     listCharacters: createListCharactersTool(ctx),
     getCharacter: createGetCharacterTool(ctx),
+    addCharacter: createAddCharacterTool(ctx),
+    updateCharacter: createUpdateCharacterTool(ctx),
     // 伏笔（数据库）
     listForeshadowing: createListForeshadowingTool(ctx),
+    addForeshadowing: createAddForeshadowingTool(ctx),
+    updateForeshadowing: createUpdateForeshadowingTool(ctx),
     // 大纲
     getOutline: createGetOutlineTool(ctx),
+    updateOutline: createUpdateOutlineTool(ctx),
+    // 写作配置
+    updateNovelConfig: createUpdateNovelConfigTool(ctx),
     // 统计
     getStats: createGetStatsTool(ctx),
     // 版本控制

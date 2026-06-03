@@ -261,9 +261,9 @@ export default function ForeshadowingPage() {
               <p className="text-gray-500">没有找到匹配的伏笔</p>
             </div>
           ) : (
-            filteredForeshadowing.map((item) => (
+            filteredForeshadowing.map((item, index) => (
               <div
-                key={item.id}
+                key={item.id || `hook-${index}`}
                 className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 hover:border-blue-200 transition-colors"
               >
                 <div className="flex items-start justify-between mb-4">
