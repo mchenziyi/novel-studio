@@ -357,6 +357,18 @@ function initializeDatabase(db: Database.Database) {
       FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS style_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id TEXT NOT NULL DEFAULT 'default',
+      name TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      llm_guide TEXT,
+      is_active INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance);
     CREATE INDEX IF NOT EXISTS idx_story_facts_novel_id ON story_facts(novel_id);
     CREATE INDEX IF NOT EXISTS idx_story_facts_chapter ON story_facts(chapter);

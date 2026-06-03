@@ -355,6 +355,74 @@ export function createUpdateNovelConfigTool(ctx: ToolContext) {
   };
 }
 
+// ==================== 文风工具 ====================
+
+export function createImportStyleTool(ctx: ToolContext) {
+  return {
+    description: '导入文风配置。当用户提供参考文本并要求模仿其风格时使用。分析参考文本的句长、词汇、节奏、句式等特征，生成文风指纹并激活。',
+    parameters: z.object({
+      name: z.string().describe('文风配置名称，如"金庸风格"、"余华风格"'),
+      referenceText: z.string().describe('参考文本（至少 500 字）'),
+    }),
+    execute: async ({ name, referenceText }: { name: string; referenceText: string }) => {
+      const db = getDatabase();
+
+      // 统计分析
+      const sentences = referenceText.split(/[。！？.!?]+/).filter(s => s.trim());
+      const avgLen = Math.round(sentences.reduce((sum, s) => sum + s.length, 0) / sentences.length);
+      const shortRatio = Math.round(sentences.filter(s => s.length < 15).length / sentences.length * 100);
+
+      // 词频统计（简单版）
+      const chars = referenceText.replace(/[^\u4e00-\u9fa5]/g, '');
+      const freq: Record<string, number> = {};
+      for (let i = 0; i < chars.length - 1; i++) {
+        const bigram = chars[i] + chars[i + 1];
+        freq[bigram] = (freq[bigram] || 0) + 1;
+      }
+      const topWords = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([w]) => w);
+
+      const fingerprint = {
+        sentenceLength: { avg: avgLen, shortPercent: shortRatio },
+        topWords,
+        textLength: referenceText.length,
+        sentenceCount: sentences.length,
+      };
+
+      const now = new Date().toISOString();
+      db.prepare('UPDATE style_profiles SET is_active = 0 WHERE novel_id = ?').run(ctx.novelId);
+      db.prepare(`
+        INSERT INTO style_profiles (novel_id, name, fingerprint, llm_guide, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 1, ?, ?)
+      `).run(ctx.novelId, name, JSON.stringify(fingerprint), `模仿${name}：平均句长${avgLen}字，短句${shortRatio}%`, now, now);
+
+      return {
+        success: true,
+        name,
+        fingerprint,
+        message: `已导入文风「${name}」并激活。平均句长${avgLen}字，短句占比${shortRatio}%`,
+      };
+    },
+  };
+}
+
+export function createGetActiveStyleTool(ctx: ToolContext) {
+  return {
+    description: '获取当前激活的文风配置。',
+    parameters: z.object({}),
+    execute: async () => {
+      const db = getDatabase();
+      const row = db.prepare('SELECT * FROM style_profiles WHERE novel_id = ? AND is_active = 1').get(ctx.novelId) as any;
+      if (!row) return { active: false, message: '当前没有激活的文风配置' };
+      return {
+        active: true,
+        name: row.name,
+        fingerprint: JSON.parse(row.fingerprint),
+        llmGuide: row.llm_guide,
+      };
+    },
+  };
+}
+
 // ==================== 大纲工具 ====================
 
 export function createGetOutlineTool(ctx: ToolContext) {
@@ -563,6 +631,9 @@ export function createChatAgentTools(novelId: string) {
     updateOutline: createUpdateOutlineTool(ctx),
     // 写作配置
     updateNovelConfig: createUpdateNovelConfigTool(ctx),
+    // 文风工具
+    importStyle: createImportStyleTool(ctx),
+    getActiveStyle: createGetActiveStyleTool(ctx),
     // 统计
     getStats: createGetStatsTool(ctx),
     // 版本控制

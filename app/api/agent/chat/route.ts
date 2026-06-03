@@ -29,7 +29,7 @@ interface ChatRequest {
 }
 
 // 构建系统提示
-function buildSystemPrompt(context: string, novelId: string, novelConfig?: any): string {
+function buildSystemPrompt(context: string, novelId: string, novelConfig?: any, activeStyle?: any): string {
   let configSection = '';
   if (novelConfig) {
     configSection = `
@@ -41,11 +41,20 @@ ${novelConfig.forbiddenPatterns?.length ? `\n### 禁止写法\n${novelConfig.for
 ${novelConfig.coreSettings?.length ? `\n### 核心设定\n${novelConfig.coreSettings.map((r: string) => `- ${r}`).join('\n')}` : ''}`;
   }
 
+  let styleSection = '';
+  if (activeStyle) {
+    styleSection = `
+## 当前激活文风：${activeStyle.name}
+${activeStyle.llmGuide || ''}
+- 平均句长：${activeStyle.fingerprint?.sentenceLength?.avg || '?'} 字
+- 短句占比：${activeStyle.fingerprint?.sentenceLength?.shortPercent || '?'}%`;
+  }
+
   const basePrompt = `你是 Novel Studio 的 AI 写作助手。
 
 ## 项目信息
 - 当前小说 ID：${novelId}
-${configSection}
+${configSection}${styleSection}
 
 ## 使用原则
 1. 先用工具查询数据再回答，不要凭记忆
@@ -170,8 +179,19 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // 加载激活的文风配置
+    const styleRow = db.prepare('SELECT * FROM style_profiles WHERE novel_id = ? AND is_active = 1').get(novelId) as any;
+    let activeStyle: any = null;
+    if (styleRow) {
+      activeStyle = {
+        name: styleRow.name,
+        fingerprint: JSON.parse(styleRow.fingerprint),
+        llmGuide: styleRow.llm_guide,
+      };
+    }
+
     // 构建系统提示
-    const systemPrompt = buildSystemPrompt(context, novelId, novelConfig);
+    const systemPrompt = buildSystemPrompt(context, novelId, novelConfig, activeStyle);
 
     // 创建工具集（基于当前小说 ID）
     const tools = createChatAgentTools(novelId);
