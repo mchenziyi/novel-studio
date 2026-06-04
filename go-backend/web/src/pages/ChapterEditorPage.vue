@@ -24,7 +24,7 @@ const prevContent = ref(''); const diffBlocks = ref<any[]>([])
 
 // Scroll sync
 const leftGut = ref<HTMLElement>(); const leftCon = ref<HTMLElement>()
-const edtGut = ref<HTMLElement>(); const edtScr = ref<HTMLElement>()
+const edtGut = ref<HTMLElement>(); const edtText = ref<HTMLTextAreaElement>()
 
 // AI
 const messages = ref<any[]>([]); const aiInput = ref(''); const aiLoading = ref(false)
@@ -71,31 +71,39 @@ function dm(e:MouseEvent){if(!dragging)return;const t=leftW.value+midW.value+rig
 function du(){dragging=null}
 
 // ====== SCROLL SYNC ======
-// syncScroll copies scroll position from the scrolled panel to the other panel.
-// scrollTop/scrollLeft to same value are browser no-ops, so no feedback loop risk.
-function syncScroll(e: Event, side: 'left' | 'edit') {
+// panelMap tracks which gutter + content pair belongs to each panel
+function syncLeftScroll(e: Event) {
   const src = e.target as HTMLElement
-  let t = src.scrollTop, l = src.scrollLeft
+  const t = src.scrollTop, l = src.scrollLeft
+  // Sync left gutter vertically
+  if (leftGut.value) leftGut.value.scrollTop = t
+  // Sync editor: textarea vertically + horizontally
+  if (edtText.value) { edtText.value.scrollTop = t; edtText.value.scrollLeft = l }
+  // Sync editor gutter vertically
+  if (edtGut.value) edtGut.value.scrollTop = t
+}
 
-  // Sync vertical: gutter <-> content for the SAME panel
-  if (side === 'left') {
-    // User scrolled left panel → sync left gutter scrollTop, and sync editor panel
-    if (leftGut.value && src !== leftGut.value) leftGut.value.scrollTop = t
-    if (leftCon.value && src !== leftCon.value) { leftCon.value.scrollTop = t; leftCon.value.scrollLeft = l }
-    // Also sync editor panel (vertical only)
-    if (edtGut.value) edtGut.value.scrollTop = t
-    if (edtScr.value) { edtScr.value.scrollTop = t }
-  } else {
-    // User scrolled editor panel → sync editor gutter, and sync left panel
-    if (edtGut.value && src !== edtGut.value) edtGut.value.scrollTop = t
-    if (edtScr.value && src !== edtScr.value) { edtScr.value.scrollTop = t; edtScr.value.scrollLeft = l }
-    if (leftGut.value) leftGut.value.scrollTop = t
-    if (leftCon.value) { leftCon.value.scrollTop = t }
-  }
+function syncEditorScroll() {
+  const ta = edtText.value; if (!ta) return
+  const t = ta.scrollTop, l = ta.scrollLeft
+  // Sync editor gutter
+  if (edtGut.value) edtGut.value.scrollTop = t
+  // Sync left panel
+  if (leftGut.value) leftGut.value.scrollTop = t
+  if (leftCon.value) { leftCon.value.scrollTop = t; leftCon.value.scrollLeft = l }
+}
+
+// Reset all scroll positions (called when selecting a new version)
+function resetAllScrolls() {
+  setTimeout(() => {
+    for (const el of [leftGut.value, leftCon.value, edtGut.value, edtText.value]) {
+      if (el) el.scrollTop = 0
+    }
+  }, 50)
 }
 
 // ====== VERSION DIFF ======
-async function selectVer(ver:V){selectedVer.value=ver;try{const r=await api.chapters.diff(route.params.id as string,ver.id,'current');prevContent.value=r.left;diffBlocks.value=r.diff||[];setTimeout(()=>{if(leftGut.value)leftGut.value.scrollTop=0;if(leftCon.value)leftCon.value.scrollTop=0;if(edtGut.value)edtGut.value.scrollTop=0;if(edtScr.value)edtScr.value.scrollTop=0},50)}catch(_){prevContent.value='';diffBlocks.value=[]}}
+async function selectVer(ver:V){selectedVer.value=ver;try{const r=await api.chapters.diff(route.params.id as string,ver.id,'current');prevContent.value=r.left;diffBlocks.value=r.diff||[];resetAllScrolls()}catch(_){prevContent.value='';diffBlocks.value=[]}}
 async function rollback(){if(!selectedVer.value)return;await api.chapters.rollback(route.params.id as string,selectedVer.value.id);content.value=prevContent.value;wordCount.value=[...prevContent.value].length;selectedVer.value=null;prevContent.value='';diffBlocks.value=[];await loadVer()}
 
 const leftLines=computed(()=>prevContent.value.split('\n'))
@@ -164,7 +172,7 @@ const sl:{[k:string]:string}={synced:'已同步',pending:'待处理',audit:'审�
           <span class="ml-auto">{{prevContent?leftLines.length+'行':''}}</span>
         </div>
         <div v-if="selectedVer" class="flex-1 flex min-h-0">
-          <div ref="leftGut" class="shrink-0 w-[44px] bg-[#fcfcfc] border-r border-[#f0f0f0] overflow-hidden select-none" @scroll="syncScroll($event,'left')">
+          <div ref="leftGut" class="shrink-0 w-[44px] bg-[#fcfcfc] border-r border-[#f0f0f0] overflow-hidden select-none">
             <div class="text-right pr-1.5 text-[11px] leading-6 text-[#ccc]">
               <template v-for="(bk,bi) in diffBlocks" :key="'lg'+bi">
                 <template v-if="bk.type!=='insert'">
@@ -173,7 +181,7 @@ const sl:{[k:string]:string}={synced:'已同步',pending:'待处理',audit:'审�
               </template>
             </div>
           </div>
-          <div ref="leftCon" class="flex-1 overflow-auto" @scroll="syncScroll($event,'left')">
+          <div ref="leftCon" class="flex-1 overflow-auto" @scroll="syncLeftScroll">
             <div class="text-[13px] leading-6 min-w-full" style="font-family:'Georgia','Noto Serif SC',serif">
               <template v-for="(bk,bi) in diffBlocks" :key="'lc'+bi">
                 <template v-if="bk.type!=='insert'">
@@ -195,15 +203,13 @@ const sl:{[k:string]:string}={synced:'已同步',pending:'待处理',audit:'审�
           <span>编辑区</span><span>{{wordCount}}字 · {{editorLines.length}}行</span>
         </div>
         <div class="flex-1 flex min-h-0" style="font-family:'Georgia','Noto Serif SC',serif">
-          <div ref="edtGut" class="shrink-0 w-[44px] bg-[#fcfcfc] border-r border-[#f0f0f0] overflow-hidden select-none" @scroll="syncScroll($event,'edit')">
+          <div ref="edtGut" class="shrink-0 w-[44px] bg-[#fcfcfc] border-r border-[#f0f0f0] overflow-hidden select-none">
             <div class="text-right pr-1.5 pt-4 text-[11px] leading-6 text-[#ccc]">
               <div v-for="(_,i) in editorLines" :key="i" class="h-6">{{i+1}}</div>
             </div>
           </div>
-          <div ref="edtScr" class="flex-1 overflow-auto" @scroll="syncScroll($event,'edit')">
-            <textarea v-model="content" class="block w-full min-h-full resize-none border-0 outline-none text-[13px] leading-6 text-[#1a1a1a] bg-transparent p-4 placeholder:text-[#ddd]"
-              placeholder="开始写作..." spellcheck="false" style="white-space:pre;overflow-wrap:normal;word-break:keep-all;tab-size:2;font-family:inherit" @mouseup="mu"/>
-          </div>
+          <textarea ref="edtText" v-model="content" class="flex-1 resize-none border-0 outline-none text-[13px] leading-6 text-[#1a1a1a] bg-transparent p-4 placeholder:text-[#ddd]"
+            placeholder="开始写作..." spellcheck="false" style="white-space:pre;overflow-wrap:normal;word-break:keep-all;tab-size:2;font-family:inherit" @mouseup="mu" @scroll="syncEditorScroll"/>
         </div>
         <div v-if="showInline" class="absolute top-10 right-4 bg-white border border-[#e5e5e5] rounded-lg shadow-lg px-3 py-1.5 text-xs cursor-pointer hover:bg-[#f5f5f5] z-20" @click="aiEditSel">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="inline mr-1"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>AI 修改所选段落</div>
