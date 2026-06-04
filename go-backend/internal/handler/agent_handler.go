@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -19,6 +21,20 @@ import (
 
 // SSEChat handles POST /api/agent/chat with Eino-backed Agent
 func (h *ChatHandler) SSEChat(c *gin.Context) {
+	// 先读原始 body，v1 前端发的是 "model" 而非 "modelId"
+	bodyBytes, _ := c.GetRawData()
+	var rawBody map[string]any
+	json.Unmarshal(bodyBytes, &rawBody)
+	// 将 "model" 复制到 "modelId"（v1 兼容）
+	if _, ok := rawBody["modelId"]; !ok {
+		if m, ok := rawBody["model"].(string); ok && m != "" {
+			rawBody["modelId"] = m
+		}
+	}
+	// 重新序列化后用 ShouldBindJSON 绑定
+	fixedBytes, _ := json.Marshal(rawBody)
+	c.Request.Body = io.NopCloser(bytes.NewReader(fixedBytes))
+	
 	var req models.ChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
