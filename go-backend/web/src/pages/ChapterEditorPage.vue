@@ -49,7 +49,21 @@ async function loadCh() {
   try { chapter.value = await api.chapters.get(route.params.id as string); content.value = chapter.value.content || ''; wordCount.value = chapter.value.wordCount || 0; await loadVer(); await loadHist() } catch (_) { chapter.value = { id: route.params.id, title: `第${parseInt(route.params.id as string)}章` }; content.value = '' }
   loading.value = false
 }
-async function loadVer() { try { const r = await api.chapters.history(route.params.id as string); versions.value = r.map((v: any, i: number) => ({ ...v, num: r.length - i })); if (versions.value.length >= 2) selectVer(versions.value[1]) } catch (_) { } }
+async function loadVer() {
+  try {
+    const r = await api.chapters.history(route.params.id as string)
+    versions.value = r.map((v: any, i: number) => ({ ...v, num: r.length - i }))
+    // 默认自动选中最新版本做对比
+    if (versions.value.length >= 1) {
+      selectedVer.value = versions.value[0]
+      const diff = await api.chapters.diff(route.params.id as string, selectedVer.value.id, 'current')
+      prevContent.value = diff.left
+    } else {
+      // 没有历史版本时，用当前内容作为参考
+      prevContent.value = content.value || ''
+    }
+  } catch (_) { prevContent.value = content.value || '' }
+}
 async function loadHist() { try { const d = await api.agent.sessions(novelStore.currentNovelId); const rel = (d.sessions || []).filter((s: any) => s.chapterId === route.params.id); if (rel.length > 0) { sessionId.value = rel[0].id; const ms = await api.agent.messages(sessionId.value); messages.value = (ms.messages || []).map((m: any) => ({ ...m, toolCalls: pTC(m.metadata) })) } } catch (_) { } }
 function pTC(meta: string) { try { const d = JSON.parse(meta); return (d.toolCalls || []).map((n: string) => ({ name: n, status: 'done' })) } catch { return [] } }
 
@@ -123,12 +137,12 @@ const sl: { [k: string]: string } = { synced: '已同步', pending: '待处理',
       <div :style="{ width: leftW + '%' }" class="border-r border-[#e5e5e5] flex flex-col shrink-0 overflow-hidden">
         <div class="h-7 px-3 flex items-center text-[11px] text-[#999] bg-[#fafafa] border-b border-[#e5e5e5] shrink-0 gap-2">
           <svg width="11" height="11" viewBox="0 0 12 12"><circle cx="6" cy="6" r="4" fill="#fca5a5" /></svg>
-          <span v-if="selectedVer">v{{ selectedVer.num }} · {{ selectedVer.source }}</span>
-          <span v-else>选择版本</span>
+          <span v-if="selectedVer">← v{{ selectedVer.num }} vs 当前</span>
+          <span v-else>← 保存后自动对比</span>
           <div class="flex-1" />
           <NPopconfirm v-if="selectedVer" @positive-click="rollback"><template #trigger><NButton size="tiny" type="error" ghost>还原到此版本</NButton></template>确定还原到 v{{ selectedVer.num }}？</NPopconfirm>
         </div>
-        <div v-if="selectedVer && prevContent" class="flex-1 overflow-hidden bg-[#fefefe]">
+        <div class="CodeDiff-wrapper flex-1 overflow-hidden bg-[#fefefe]">
           <CodeDiff
             :old-string="prevContent"
             :new-string="content"
@@ -138,7 +152,6 @@ const sl: { [k: string]: string } = { synced: '已同步', pending: '待处理',
             :context="9999"
           />
         </div>
-        <div v-else class="flex-1 flex items-center justify-center text-xs text-[#ccc] select-none">点击底部版本号开始对比</div>
       </div>
 
       <!-- Drag -->
