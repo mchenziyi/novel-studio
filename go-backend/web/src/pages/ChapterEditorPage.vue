@@ -9,13 +9,13 @@ import { marked } from 'marked'
 
 const route = useRoute(); const router = useRouter(); const novelStore = useNovelStore()
 
-// Chapter state
+// Chapter
 const chapter = ref<any>({}); const content = ref(''); const wordCount = ref(0)
 const saving = ref(false); const lastSaved = ref(''); const loading = ref(true)
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 
 // Layout
-const leftW = ref(44); const midW = ref(56)
+const leftW = ref(50); const rightW = ref(50)
 let dragging = false
 
 // Version
@@ -24,21 +24,22 @@ const versions = ref<V[]>([]); const selectedVer = ref<V | null>(null)
 const prevContent = ref('')
 
 // AI
-const messages = ref<any[]>([]); const aiInput = ref(''); const aiLoading = ref(false)
-const streamingMsg = ref(''); const sDone = ref(true); const sessionId = ref('')
-const model = ref(''); const ctxType = ref<'edit' | 'brainstorm' | 'analyze'>('edit')
+const messages = ref<any[]>([]); const aiInput = ref('')
+const aiLoading = ref(false); const streamingMsg = ref(''); const sDone = ref(true)
+const sessionId = ref(''); const model = ref('')
+const ctxType = ref<'edit' | 'brainstorm' | 'analyze'>('edit')
 const models = ref<{ id: string; name: string }[]>([]); const toolCalls = ref<any[]>([])
 let abortCtrl: AbortController | null = null
 const selectedText = ref(''); const showInline = ref(false)
 
 // ====== LIFECYCLE ======
 onMounted(async () => {
-  document.addEventListener('keydown', kd); document.addEventListener('mouseup', mu)
+  document.addEventListener('keydown', kd)
   window.addEventListener('mousemove', dm); window.addEventListener('mouseup', du)
   await loadModels(); await loadCh()
 })
 onUnmounted(() => {
-  document.removeEventListener('keydown', kd); document.removeEventListener('mouseup', mu)
+  document.removeEventListener('keydown', kd)
   window.removeEventListener('mousemove', dm); window.removeEventListener('mouseup', du)
   if (autoSaveTimer) clearTimeout(autoSaveTimer)
 })
@@ -53,16 +54,21 @@ async function loadVer() {
   try {
     const r = await api.chapters.history(route.params.id as string)
     versions.value = r.map((v: any, i: number) => ({ ...v, num: r.length - i }))
-    // 默认自动选中最新版本做对比
     if (versions.value.length >= 1) {
       selectedVer.value = versions.value[0]
-      const diff = await api.chapters.diff(route.params.id as string, selectedVer.value.id, 'current')
-      prevContent.value = diff.left
-    } else {
-      // 没有历史版本时，用当前内容作为参考
-      prevContent.value = content.value || ''
-    }
+      prevContent.value = (await api.chapters.diff(route.params.id as string, selectedVer.value.id, 'current')).left
+    } else { prevContent.value = content.value || '' }
   } catch (_) { prevContent.value = content.value || '' }
+}
+async function selectVer(ver: V) {
+  selectedVer.value = ver
+  try { const r = await api.chapters.diff(route.params.id as string, ver.id, 'current'); prevContent.value = r.left } catch (_) { }
+}
+async function rollback() {
+  if (!selectedVer.value) return
+  await api.chapters.rollback(route.params.id as string, selectedVer.value.id)
+  content.value = prevContent.value; wordCount.value = [...prevContent.value].length
+  selectedVer.value = null; prevContent.value = ''; await loadVer()
 }
 async function loadHist() { try { const d = await api.agent.sessions(novelStore.currentNovelId); const rel = (d.sessions || []).filter((s: any) => s.chapterId === route.params.id); if (rel.length > 0) { sessionId.value = rel[0].id; const ms = await api.agent.messages(sessionId.value); messages.value = (ms.messages || []).map((m: any) => ({ ...m, toolCalls: pTC(m.metadata) })) } } catch (_) { } }
 function pTC(meta: string) { try { const d = JSON.parse(meta); return (d.toolCalls || []).map((n: string) => ({ name: n, status: 'done' })) } catch { return [] } }
@@ -76,20 +82,11 @@ function kd(e: KeyboardEvent) { if ((e.ctrlKey || e.metaKey) && e.key === 's') {
 
 // ====== DRAG ======
 function ds(e: MouseEvent) { dragging = true; e.preventDefault() }
-function dm(e: MouseEvent) { if (!dragging) return; const p = (e.clientX / window.innerWidth) * 100; leftW.value = Math.max(20, Math.min(70, p - 2)); midW.value = 100 - leftW.value }
+function dm(e: MouseEvent) { if (!dragging) return; const p = (e.clientX / window.innerWidth) * 100; leftW.value = Math.max(20, Math.min(80, p - 2)); rightW.value = 100 - leftW.value }
 function du() { dragging = false }
 
-// ====== VERSION ======
-async function selectVer(ver: V) { 
-  selectedVer.value = ver
-  try {
-    const r = await api.chapters.diff(route.params.id as string, ver.id, 'current')
-    prevContent.value = r.left
-  } catch (_) { prevContent.value = '' }
-}
-async function rollback() { if (!selectedVer.value) return; await api.chapters.rollback(route.params.id as string, selectedVer.value.id); content.value = prevContent.value; wordCount.value = [...prevContent.value].length; selectedVer.value = null; prevContent.value = ''; await loadVer() }
-
 const editorLines = computed(() => content.value.split('\n'))
+const prevLines = computed(() => prevContent.value.split('\n'))
 
 // ====== AI ======
 async function sendAi() {
@@ -117,95 +114,102 @@ const sl: { [k: string]: string } = { synced: '已同步', pending: '待处理',
 <template>
   <div v-if="loading" class="flex justify-center py-20"><div class="w-8 h-8 border-2 border-[#d4d4d4] border-t-[#171717] rounded-full animate-spin" /></div>
   <div v-else class="flex flex-col h-full bg-[#fafafa]">
+
     <!-- Top Bar -->
     <div class="flex items-center h-10 px-4 border-b border-[#e5e5e5] bg-white shrink-0 gap-3 text-sm z-10 shadow-sm">
-      <button @click="router.back()" class="text-[#666] hover:text-[#1a1a1a] shrink-0"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" fill="none" /></svg></button>
-      <span class="font-semibold text-[#1a1a1a]">{{ chapter.id }}</span>
-      <span class="text-[#666] truncate max-w-[160px]">{{ chapter.title }}</span>
-      <span class="text-xs text-[#999] bg-[#f5f5f5] px-1.5 py-0.5 rounded">{{ wordCount }}字</span>
-      <NTag size="tiny" :type="chapter.status === 'synced' ? 'success' : chapter.status === 'audit' ? 'warning' : 'default'" :bordered="false">{{ sl[chapter.status] || chapter.status }}</NTag>
-      <div class="flex-1" />
-      <NSelect v-model:value="ctxType" size="tiny" :options="[{ label: '编辑', value: 'edit' }, { label: '头脑风暴', value: 'brainstorm' }, { label: '分析', value: 'analyze' }]" style="width: 100px" />
-      <NSelect v-model:value="model" size="tiny" :options="models.map((m: any) => ({ label: m.name, value: m.id }))" placeholder="模型" style="width: 120px" clearable />
-      <span v-if="lastSaved" class="text-xs text-[#999]">已保存于{{ lastSaved }}</span>
+      <button @click="router.back()" class="text-[#666] hover:text-[#1a1a1a] shrink-0"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></button>
+      <span class="font-semibold text-[#1a1a1a]">{{chapter.id}}</span><span class="text-[#666] truncate max-w-[160px]">{{chapter.title}}</span>
+      <span class="text-xs text-[#999] bg-[#f5f5f5] px-1.5 py-0.5 rounded">{{wordCount}}字</span>
+      <NTag size="tiny" :type="chapter.status==='synced'?'success':chapter.status==='audit'?'warning':'default'" :bordered="false">{{sl[chapter.status]||chapter.status}}</NTag>
+      <div class="flex-1"/>
+      <NSelect v-model:value="ctxType" size="tiny" :options="[{label:'编辑',value:'edit'},{label:'头脑风暴',value:'brainstorm'},{label:'分析',value:'analyze'}]" style="width:100px"/>
+      <NSelect v-model:value="model" size="tiny" :options="models.map((m:any)=>({label:m.name,value:m.id}))" placeholder="模型" style="width:120px" clearable/>
+      <span v-if="lastSaved" class="text-xs text-[#999]">已保存于{{lastSaved}}</span>
       <NButton size="tiny" @click="doSave" :loading="saving">保存</NButton>
     </div>
 
-    <!-- Two panels + drag -->
-    <div class="flex-1 flex min-h-0 bg-white relative">
-      <!-- LEFT: CodeDiff -->
-      <div :style="{ width: leftW + '%' }" class="border-r border-[#e5e5e5] flex flex-col shrink-0 overflow-hidden">
+    <!-- Upper: 旧版 + 编辑区 并排 -->
+    <div class="flex-1 flex min-h-0 bg-white relative" style="max-height:55%">
+      <!-- LEFT: 旧版本（只读） -->
+      <div :style="{width:leftW+'%'}" class="border-r border-[#e5e5e5] flex flex-col shrink-0">
         <div class="h-7 px-3 flex items-center text-[11px] text-[#999] bg-[#fafafa] border-b border-[#e5e5e5] shrink-0 gap-2">
-          <svg width="11" height="11" viewBox="0 0 12 12"><circle cx="6" cy="6" r="4" fill="#fca5a5" /></svg>
-          <span v-if="selectedVer">← v{{ selectedVer.num }} vs 当前</span>
-          <span v-else>← 保存后自动对比</span>
-          <div class="flex-1" />
-          <NPopconfirm v-if="selectedVer" @positive-click="rollback"><template #trigger><NButton size="tiny" type="error" ghost>还原到此版本</NButton></template>确定还原到 v{{ selectedVer.num }}？</NPopconfirm>
+          <svg width="11" height="11" viewBox="0 0 12 12"><circle cx="6" cy="6" r="4" fill="#fca5a5"/></svg>
+          <span v-if="selectedVer">v{{selectedVer.num}} · {{selectedVer.source}} · 旧版（只读）</span>
+          <span v-else>旧版（保存后自动加载）</span>
+          <span class="ml-auto text-[#ccc]">{{prevLines.length}}行</span>
         </div>
-        <div class="flex-1 overflow-hidden bg-[#fefefe] diff-hide-header">
-          <CodeDiff
-            :old-string="prevContent"
-            :new-string="content"
-            output-format="side-by-side"
-            diff-style="char"
-            language="plaintext"
-            :context="9999"
-          />
+        <div class="flex-1 flex min-h-0" style="font-family:'Georgia','Noto Serif SC',serif">
+          <div class="shrink-0 w-[40px] bg-[#fcfcfc] border-r border-[#f0f0f0] overflow-hidden select-none">
+            <div class="text-right pr-2 pt-3 text-[13px] leading-6 text-[#ccc] font-mono">
+              <div v-for="(_,i) in prevLines" :key="i" class="h-6">{{i+1}}</div>
+            </div>
+          </div>
+          <div class="flex-1 overflow-auto p-3 text-[13px] leading-6 text-[#888] font-serif whitespace-pre select-none" style="font-family:inherit">
+            {{prevContent || '（无内容）'}}
+          </div>
         </div>
       </div>
 
       <!-- Drag -->
-      <div class="w-[3px] bg-transparent hover:bg-[#ddd] cursor-col-resize shrink-0 z-10 transition-colors" @mousedown="ds" />
+      <div class="w-[3px] bg-transparent hover:bg-[#ddd] cursor-col-resize shrink-0 z-10" @mousedown="ds"/>
 
-      <!-- RIGHT: Editor -->
-      <div :style="{ width: midW + '%' }" class="flex flex-col shrink-0 relative">
+      <!-- RIGHT: 编辑区 -->
+      <div :style="{width:rightW+'%'}" class="flex flex-col shrink-0 relative">
         <div class="h-7 px-3 flex items-center text-[11px] text-[#999] bg-[#fafafa] border-b border-[#e5e5e5] shrink-0 justify-between">
-          <span>编辑区</span><span>{{ wordCount }}字 · {{ editorLines.length }}行</span>
+          <span>编辑区</span>
+          <span>{{wordCount}}字 · {{editorLines.length}}行</span>
         </div>
-        <style scoped>
-        .diff-hide-header :deep(.v-code-diff-header) { height: 0 !important; overflow: hidden !important; border: none !important; padding: 0 !important; margin: 0 !important; }
-        .diff-hide-header :deep(.old-diff-header) { height: 0 !important; overflow: hidden !important; border: none !important; padding: 0 !important; }
-        .diff-hide-header :deep(.new-diff-header) { height: 0 !important; overflow: hidden !important; border: none !important; padding: 0 !important; }
-        </style>
-        <div class="flex-1 flex min-h-0" style="font-family: 'Georgia','Noto Serif SC', serif">
+        <div class="flex-1 flex min-h-0" style="font-family:'Georgia','Noto Serif SC',serif">
           <div class="shrink-0 w-[40px] bg-[#fcfcfc] border-r border-[#f0f0f0] overflow-hidden select-none">
-            <div class="text-right pr-2 pt-4 text-[13px] leading-6 text-[#ccc] font-mono">
-              <div v-for="(_, i) in editorLines" :key="i" class="h-6">{{ i + 1 }}</div>
+            <div class="text-right pr-2 pt-3 text-[13px] leading-6 text-[#ccc] font-mono">
+              <div v-for="(_,i) in editorLines" :key="i" class="h-6">{{i+1}}</div>
             </div>
           </div>
-          <textarea v-model="content" class="flex-1 resize-none border-0 outline-none text-[13px] leading-6 text-[#1a1a1a] bg-transparent p-4 placeholder:text-[#ddd]" placeholder="开始写作..." spellcheck="false" style="white-space: pre; overflow-wrap: normal; word-break: keep-all; tab-size: 2; font-family: inherit" @mouseup="mu" />
+          <textarea v-model="content" class="flex-1 resize-none border-0 outline-none text-[13px] leading-6 text-[#1a1a1a] bg-transparent p-3 placeholder:text-[#ddd]" placeholder="开始写作..." spellcheck="false" style="white-space:pre;overflow-wrap:normal;word-break:keep-all;tab-size:2;font-family:inherit" @mouseup="mu"/>
         </div>
         <div v-if="showInline" class="absolute top-10 right-4 bg-white border border-[#e5e5e5] rounded-lg shadow-lg px-3 py-1.5 text-xs cursor-pointer hover:bg-[#f5f5f5] z-20" @click="aiEditSel">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="inline mr-1"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>AI 修改所选段落
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="inline mr-1"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>AI 修改所选段落
         </div>
       </div>
     </div>
 
-    <!-- Bottom: AI Chat -->
+    <!-- Lower: CodeDiff between old (prevContent) and new (content) -->
+    <div class="border-t border-[#e5e5e5] bg-white" style="max-height:45%;flex:1;overflow:hidden">
+      <div class="h-6 px-3 flex items-center text-[11px] text-[#999] bg-[#fafafa] border-b border-[#eee] shrink-0 gap-2">
+        <svg width="11" height="11" viewBox="0 0 12 12"><path d="M2 6h3l1-3 1 6 1-3h3" stroke="#999" stroke-width="1" fill="none"/></svg>
+        <span>差异对比 ← v{selectedVer?.num} vs 当前</span>
+        <div class="flex-1"/>
+        <NPopconfirm v-if="selectedVer" @positive-click="rollback"><template #trigger><NButton size="tiny" type="error" ghost>还原到此版本</NButton></template>确定还原到 v{{selectedVer.num}}？</NPopconfirm>
+      </div>
+      <div class="overflow-auto" style="height:calc(100% - 24px)">
+        <CodeDiff :old-string="prevContent" :new-string="content" output-format="side-by-side" diff-style="char" language="plaintext" :context="9999"/>
+      </div>
+    </div>
+
+    <!-- Bottom bar: AI chat + version selector -->
     <div class="border-t border-[#e5e5e5] bg-white shrink-0">
-      <div class="h-7 px-3 flex items-center text-[11px] text-[#999] bg-[#fafafa] border-b border-[#eee] shrink-0 justify-between">
+      <!-- Version bar -->
+      <div class="flex items-center h-7 px-3 bg-[#fafafa] gap-1 overflow-x-auto border-b border-[#eee]">
+        <span class="text-[11px] text-[#999] mr-1 shrink-0">版本</span>
+        <button v-for="ver in versions" :key="ver.id" @click="selectVer(ver)" class="text-[11px] px-2 py-0.5 rounded border shrink-0 transition-colors" :class="selectedVer?.id===ver.id?'bg-white border-[#bbb] text-[#1a1a1a] font-semibold shadow-sm':'border-transparent text-[#888] hover:bg-black/[0.02] hover:text-[#555]'">v{{ver.num}}</button>
+      </div>
+
+      <!-- AI Chat -->
+      <div class="h-7 px-3 flex items-center text-[11px] text-[#999] bg-[#fafafa] border-b border-[#eee] justify-between">
         <span>AI 对话</span>
         <button v-if="aiLoading" @click="stopAi" class="text-red-500 text-[11px]">停止</button>
       </div>
-      <div class="overflow-auto px-3 py-2 space-y-1.5 text-[12px]" style="max-height: 280px">
-        <div v-if="messages.length === 0 && !streamingMsg" class="text-center py-4 text-[#bbb]">AI 写作助手</div>
-        <template v-for="(msg, i) in messages" :key="i">
-          <div v-if="msg.role === 'user'" class="flex justify-end"><div class="max-w-[80%] bg-[#e8e8e8] rounded-lg px-2 py-1 whitespace-pre-wrap">{{ msg.content }}</div></div>
-          <div v-else><div v-if="msg.error" class="text-red-500">{{ msg.content }}</div><div v-else class="prose prose-xs max-w-none prose-p:my-0.5" v-html="rm(msg.content)" /><div v-if="msg.toolCalls?.length" class="flex gap-1 mt-0.5"><NTag v-for="tc in msg.toolCalls" :key="tc.name" size="tiny" :bordered="false">{{ tl[tc.name] || tc.name }}</NTag></div></div>
+      <div class="overflow-auto px-3 py-1.5 space-y-1.5 text-[12px]" style="max-height:160px">
+        <div v-if="messages.length===0&&!streamingMsg" class="text-center py-2 text-[#bbb]">AI 写作助手</div>
+        <template v-for="(msg,i) in messages" :key="i">
+          <div v-if="msg.role==='user'" class="flex justify-end"><div class="max-w-[80%] bg-[#e8e8e8] rounded-lg px-2 py-1 whitespace-pre-wrap">{{msg.content}}</div></div>
+          <div v-else><div v-if="msg.error" class="text-red-500">{{msg.content}}</div><div v-else class="prose prose-xs max-w-none prose-p:my-0.5" v-html="rm(msg.content)"/><div v-if="msg.toolCalls?.length" class="flex gap-1 mt-0.5"><NTag v-for="tc in msg.toolCalls" :key="tc.name" size="tiny" :bordered="false">{{tl[tc.name]||tc.name}}</NTag></div></div>
         </template>
-        <div v-if="streamingMsg"><div class="prose prose-xs max-w-none prose-p:my-0.5" v-html="rm(streamingMsg)" /><span v-if="!sDone" class="inline-block w-1 h-3 bg-[#555] animate-pulse ml-0.5 rounded-sm" /></div>
+        <div v-if="streamingMsg"><div class="prose prose-xs max-w-none prose-p:my-0.5" v-html="rm(streamingMsg)"/><span v-if="!sDone" class="inline-block w-1 h-3 bg-[#555] animate-pulse ml-0.5 rounded-sm"/></div>
       </div>
-      <div class="px-3 py-2 border-t border-[#eee] bg-white flex gap-2 items-center">
-        <input v-model="aiInput" class="flex-1 border border-[#e5e5e5] rounded-full px-3 py-1.5 text-xs outline-none focus:border-[#999]" placeholder="发送消息..." @keydown.enter="sendAi()" :disabled="aiLoading" />
-        <NButton size="tiny" type="primary" @click="sendAi" :disabled="!aiInput.trim() || aiLoading" round>发送</NButton>
-      </div>
-    </div>
-
-    <!-- Version bar -->
-    <div class="border-t border-[#e5e5e5] bg-white shrink-0">
-      <div class="flex items-center h-8 px-3 bg-[#fafafa] gap-1 overflow-x-auto">
-        <span class="text-[11px] text-[#999] mr-1 shrink-0 flex items-center gap-1"><svg width="11" height="11" viewBox="0 0 12 12"><path d="M2 6h3l1-3 1 6 1-3h3" stroke="#999" stroke-width="1" fill="none" /></svg>版本</span>
-        <button v-for="ver in versions" :key="ver.id" @click="selectVer(ver)" class="text-[11px] px-2 py-0.5 rounded border shrink-0 transition-colors" :class="selectedVer?.id === ver.id ? 'bg-white border-[#bbb] text-[#1a1a1a] font-semibold shadow-sm' : 'border-transparent text-[#888] hover:bg-black/[0.02] hover:text-[#555]'">v{{ ver.num }}</button>
+      <div class="px-3 py-1.5 border-t border-[#eee] bg-white flex gap-2 items-center">
+        <input v-model="aiInput" class="flex-1 border border-[#e5e5e5] rounded-full px-3 py-1 text-xs outline-none focus:border-[#999]" placeholder="发送消息..." @keydown.enter="sendAi()" :disabled="aiLoading"/>
+        <NButton size="tiny" type="primary" @click="sendAi" :disabled="!aiInput.trim()||aiLoading" round>发送</NButton>
       </div>
     </div>
   </div>
