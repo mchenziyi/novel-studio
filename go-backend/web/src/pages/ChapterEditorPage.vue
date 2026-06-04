@@ -14,8 +14,8 @@ const saving = ref(false); const lastSaved = ref(''); const loading = ref(true)
 let autoSaveTimer: ReturnType<typeof setTimeout>|null = null
 
 // Layout
-const leftW = ref(44); const midW = ref(44); const rightW = ref(12)
-let dragging: 'left'|'right'|null = null
+const leftW = ref(44); const midW = ref(56)
+let dragging: 'left'|null = null
 
 // Version diff
 type V = { id:string; source:string; timestamp:string; description:string; num:number }
@@ -66,8 +66,8 @@ watch(()=>route.params.id,loadCh)
 function kd(e:KeyboardEvent){if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();doSave()}}
 
 // ====== DRAG ======
-function ds(e:MouseEvent,s:'left'|'right'){dragging=s;e.preventDefault()}
-function dm(e:MouseEvent){if(!dragging)return;const t=leftW.value+midW.value+rightW.value;const p=(e.clientX/window.innerWidth)*100;if(dragging==='left'){leftW.value=Math.max(12,Math.min(40,p-t*0.05));midW.value=Math.max(20,t-leftW.value-rightW.value)}else{rightW.value=Math.max(12,Math.min(40,t-p));midW.value=Math.max(20,t-leftW.value-rightW.value)}}
+function ds(e:MouseEvent){dragging='left';e.preventDefault()}
+function dm(e:MouseEvent){if(!dragging)return;const p=(e.clientX/window.innerWidth)*100;leftW.value=Math.max(20,Math.min(70,p-2));midW.value=100-leftW.value}
 function du(){dragging=null}
 
 // ====== SCROLL SYNC ======
@@ -194,8 +194,8 @@ const sl:{[k:string]:string}={synced:'已同步',pending:'待处理',audit:'审�
         <div v-else class="flex-1 flex items-center justify-center text-xs text-[#ccc] select-none">点击底部版本号开始对比</div>
       </div>
 
-      <!-- Drag 1 -->
-      <div class="w-[3px] bg-transparent hover:bg-[#ddd] cursor-col-resize shrink-0 z-10 transition-colors" @mousedown="(e:any)=>ds(e,'left')"/>
+      <!-- Drag handle between panels -->
+      <div class="w-[3px] bg-transparent hover:bg-[#ddd] cursor-col-resize shrink-0 z-10 transition-colors" @mousedown="ds"/>
 
       <!-- PANEL 2: Editor -->
       <div :style="{width:midW+'%'}" class="flex flex-col shrink-0 relative">
@@ -215,26 +215,25 @@ const sl:{[k:string]:string}={synced:'已同步',pending:'待处理',audit:'审�
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="inline mr-1"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>AI 修改所选段落</div>
       </div>
 
-      <!-- Drag 2 -->
-      <div class="w-[3px] bg-transparent hover:bg-[#ddd] cursor-col-resize shrink-0 z-10 transition-colors" @mousedown="(e:any)=>ds(e,'right')"/>
+    </div>
 
-      <!-- PANEL 3: Chat -->
-      <div :style="{width:rightW+'%'}" class="flex flex-col shrink-0 border-l border-[#e5e5e5] bg-[#fafafa]">
-        <div class="h-7 px-3 flex items-center text-[11px] text-[#999] bg-[#fafafa] border-b border-[#e5e5e5] shrink-0 justify-between">
-          <span>AI 对话</span><button v-if="aiLoading" @click="stopAi" class="text-red-500 text-[11px]">停止</button>
-        </div>
-        <div class="flex-1 overflow-auto px-2 py-1.5 space-y-1.5 text-[12px]">
-          <div v-if="messages.length===0&&!streamingMsg" class="text-center py-8 text-[#bbb]">AI 写作助手</div>
-          <template v-for="(msg,i) in messages" :key="i">
-            <div v-if="msg.role==='user'" class="flex justify-end"><div class="max-w-[90%] bg-[#e8e8e8] rounded-lg px-2 py-1 whitespace-pre-wrap">{{msg.content}}</div></div>
-            <div v-else><div v-if="msg.error" class="text-red-500">{{msg.content}}</div><div v-else class="prose prose-xs max-w-none prose-p:my-0.5" v-html="rm(msg.content)"/><div v-if="msg.toolCalls?.length" class="flex gap-1 mt-0.5"><NTag v-for="tc in msg.toolCalls" :key="tc.name" size="tiny" :bordered="false">{{tl[tc.name]||tc.name}}</NTag></div></div>
-          </template>
-          <div v-if="streamingMsg"><div class="prose prose-xs max-w-none prose-p:my-0.5" v-html="rm(streamingMsg)"/><span v-if="!sDone" class="inline-block w-1 h-3 bg-[#555] animate-pulse ml-0.5 rounded-sm"/></div>
-        </div>
-        <div class="px-2 py-1.5 border-t border-[#eee] bg-white flex gap-1.5">
-          <input v-model="aiInput" class="flex-1 border border-[#e5e5e5] rounded-full px-3 py-1 text-xs outline-none focus:border-[#999]" placeholder="发送消息..." @keydown.enter="sendAi()" :disabled="aiLoading"/>
-          <NButton size="tiny" type="primary" @click="sendAi" :disabled="!aiInput.trim()||aiLoading" round>发送</NButton>
-        </div>
+    <!-- Bottom: AI Chat -->
+    <div class="border-t border-[#e5e5e5] bg-white shrink-0">
+      <div class="h-7 px-3 flex items-center text-[11px] text-[#999] bg-[#fafafa] border-b border-[#eee] shrink-0 justify-between">
+        <span>AI 对话</span>
+        <button v-if="aiLoading" @click="stopAi" class="text-red-500 text-[11px]">停止</button>
+      </div>
+      <div class="overflow-auto px-3 py-2 space-y-1.5 text-[12px]" style="max-height:280px">
+        <div v-if="messages.length===0&&!streamingMsg" class="text-center py-4 text-[#bbb]">AI 写作助手</div>
+        <template v-for="(msg,i) in messages" :key="i">
+          <div v-if="msg.role==='user'" class="flex justify-end"><div class="max-w-[80%] bg-[#e8e8e8] rounded-lg px-2 py-1 whitespace-pre-wrap">{{msg.content}}</div></div>
+          <div v-else><div v-if="msg.error" class="text-red-500">{{msg.content}}</div><div v-else class="prose prose-xs max-w-none prose-p:my-0.5" v-html="rm(msg.content)"/><div v-if="msg.toolCalls?.length" class="flex gap-1 mt-0.5"><NTag v-for="tc in msg.toolCalls" :key="tc.name" size="tiny" :bordered="false">{{tl[tc.name]||tc.name}}</NTag></div></div>
+        </template>
+        <div v-if="streamingMsg"><div class="prose prose-xs max-w-none prose-p:my-0.5" v-html="rm(streamingMsg)"/><span v-if="!sDone" class="inline-block w-1 h-3 bg-[#555] animate-pulse ml-0.5 rounded-sm"/></div>
+      </div>
+      <div class="px-3 py-2 border-t border-[#eee] bg-white flex gap-2 items-center">
+        <input v-model="aiInput" class="flex-1 border border-[#e5e5e5] rounded-full px-3 py-1.5 text-xs outline-none focus:border-[#999]" placeholder="发送消息..." @keydown.enter="sendAi()" :disabled="aiLoading"/>
+        <NButton size="tiny" type="primary" @click="sendAi" :disabled="!aiInput.trim()||aiLoading" round>发送</NButton>
       </div>
     </div>
 
