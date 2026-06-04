@@ -2,7 +2,6 @@
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NPopconfirm, NSelect, NTag } from 'naive-ui'
-import { CodeDiff } from 'v-code-diff'
 import { api } from '../api/client'
 import { useNovelStore } from '../stores/novel'
 import { marked } from 'marked'
@@ -14,111 +13,176 @@ const chapter = ref<any>({}); const content = ref(''); const wordCount = ref(0)
 const saving = ref(false); const lastSaved = ref(''); const loading = ref(true)
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 
-// Layout
-const leftW = ref(50); const rightW = ref(50)
+// Layout — two equal panels
+const leftPct = ref(50)
 let dragging = false
 
 // Version
 type V = { id: string; source: string; timestamp: string; description: string; num: number }
 const versions = ref<V[]>([]); const selectedVer = ref<V | null>(null)
 const prevContent = ref('')
+const diffBlocks = ref<any[]>([])
 
-// AI
+// Scroll sync — leftRead div ↔ rightText textarea
+const leftRead = ref<HTMLElement>(); const rightText = ref<HTMLTextAreaElement>()
+let scrollLock = false
+
+// AI (unchanged)
 const messages = ref<any[]>([]); const aiInput = ref('')
 const aiLoading = ref(false); const streamingMsg = ref(''); const sDone = ref(true)
-const sessionId = ref(''); const model = ref('')
-const ctxType = ref<'edit' | 'brainstorm' | 'analyze'>('edit')
-const models = ref<{ id: string; name: string }[]>([]); const toolCalls = ref<any[]>([])
 let abortCtrl: AbortController | null = null
-const selectedText = ref(''); const showInline = ref(false)
+const model = ref(''); const ctxType = ref<'edit'|'brainstorm'|'analyze'>('edit')
+const models = ref<{id:string;name:string}[]>([]); const toolCalls = ref<any[]>([])
+const sessionId = ref(''); const selectedText = ref(''); const showInline = ref(false)
 
 // ====== LIFECYCLE ======
-onMounted(async () => {
-  document.addEventListener('keydown', kd)
-  window.addEventListener('mousemove', dm); window.addEventListener('mouseup', du)
-  await loadModels(); await loadCh()
+onMounted(async()=>{
+  document.addEventListener('keydown',kd)
+  window.addEventListener('mousemove',dm); window.addEventListener('mouseup',du)
+  await Promise.all([loadModels(),loadCh()])
 })
-onUnmounted(() => {
-  document.removeEventListener('keydown', kd)
-  window.removeEventListener('mousemove', dm); window.removeEventListener('mouseup', du)
-  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+onUnmounted(()=>{
+  document.removeEventListener('keydown',kd)
+  window.removeEventListener('mousemove',dm); window.removeEventListener('mouseup',du)
+  if(autoSaveTimer)clearTimeout(autoSaveTimer)
 })
 
-async function loadModels() { try { const m = await api.models.list(); models.value = m.filter((x: any) => x.enabled).map((x: any) => ({ id: x.id, name: x.name })) } catch (_) { } }
-async function loadCh() {
-  loading.value = true
-  try { chapter.value = await api.chapters.get(route.params.id as string); content.value = chapter.value.content || ''; wordCount.value = chapter.value.wordCount || 0; await loadVer(); await loadHist() } catch (_) { chapter.value = { id: route.params.id, title: `第${parseInt(route.params.id as string)}章` }; content.value = '' }
-  loading.value = false
+async function loadModels(){try{const m=await api.models.list();models.value=m.filter((x:any)=>x.enabled).map((x:any)=>({id:x.id,name:x.name}))}catch(_){}}
+
+async function loadCh(){
+  loading.value=true
+  try{chapter.value=await api.chapters.get(route.params.id as string);content.value=chapter.value.content||'';wordCount.value=chapter.value.wordCount||0;await loadVer();await loadHist()}catch(_){chapter.value={id:route.params.id};content.value=''}
+  loading.value=false
 }
-async function loadVer() {
-  try {
-    const r = await api.chapters.history(route.params.id as string)
-    versions.value = r.map((v: any, i: number) => ({ ...v, num: r.length - i }))
-    if (versions.value.length >= 1) {
-      selectedVer.value = versions.value[0]
-      prevContent.value = (await api.chapters.diff(route.params.id as string, selectedVer.value.id, 'current')).left
-    } else { prevContent.value = content.value || '' }
-  } catch (_) { prevContent.value = content.value || '' }
+
+async function loadVer(){
+  try{
+    const r=await api.chapters.history(route.params.id as string)
+    versions.value=r.map((v:any,i:number)=>({...v,num:r.length-i}))
+    if(versions.value.length>=1){selectedVer.value=versions.value[0];await loadDiff(selectedVer.value)}
+    else{prevContent.value=content.value;diffBlocks.value=[]}
+  }catch(_){prevContent.value=content.value;diffBlocks.value=[]}
 }
-async function selectVer(ver: V) {
-  selectedVer.value = ver
-  try { const r = await api.chapters.diff(route.params.id as string, ver.id, 'current'); prevContent.value = r.left } catch (_) { }
+
+async function selectVer(ver:V){selectedVer.value=ver;await loadDiff(ver)}
+async function loadDiff(ver:V){
+  try{
+    const r=await api.chapters.diff(route.params.id as string,ver.id,'current')
+    prevContent.value=r.left;diffBlocks.value=r.diff||[]
+    // reset scroll
+    setTimeout(()=>{if(leftRead.value)leftRead.value.scrollTop=0;if(rightText.value)rightText.value.scrollTop=0},50)
+  }catch(_){}
 }
-async function rollback() {
-  if (!selectedVer.value) return
-  await api.chapters.rollback(route.params.id as string, selectedVer.value.id)
-  content.value = prevContent.value; wordCount.value = [...prevContent.value].length
-  selectedVer.value = null; prevContent.value = ''; await loadVer()
+
+async function rollback(){
+  if(!selectedVer.value)return
+  await api.chapters.rollback(route.params.id as string,selectedVer.value.id)
+  content.value=prevContent.value;wordCount.value=[...prevContent.value].length
+  selectedVer.value=null;prevContent.value='';diffBlocks.value=[];await loadVer()
 }
-async function loadHist() { try { const d = await api.agent.sessions(novelStore.currentNovelId); const rel = (d.sessions || []).filter((s: any) => s.chapterId === route.params.id); if (rel.length > 0) { sessionId.value = rel[0].id; const ms = await api.agent.messages(sessionId.value); messages.value = (ms.messages || []).map((m: any) => ({ ...m, toolCalls: pTC(m.metadata) })) } } catch (_) { } }
-function pTC(meta: string) { try { const d = JSON.parse(meta); return (d.toolCalls || []).map((n: string) => ({ name: n, status: 'done' })) } catch { return [] } }
+
+async function loadHist(){
+  try{const d=await api.agent.sessions(novelStore.currentNovelId);const rel=(d.sessions||[]).filter((s:any)=>s.chapterId===route.params.id)
+  if(rel.length>0){sessionId.value=rel[0].id;const ms=await api.agent.messages(sessionId.value);messages.value=(ms.messages||[]).map((m:any)=>({...m,toolCalls:pTC(m.metadata)}))}}catch(_){}
+}
+function pTC(meta:string){try{const d=JSON.parse(meta);return(d.toolCalls||[]).map((n:string)=>({name:n,status:'done'}))}catch{return[]}}
 
 // ====== SAVE ======
-async function doSave() { if (saving.value || !content.value) return; saving.value = true; try { wordCount.value = [...content.value].length; await api.chapters.update(route.params.id as string, { content: content.value }); lastSaved.value = new Date().toLocaleTimeString(); await loadVer() } catch (_) { } saving.value = false }
-function scheduleAutoSave() { if (autoSaveTimer) clearTimeout(autoSaveTimer); autoSaveTimer = setTimeout(doSave, 30000) }
-watch(content, () => { wordCount.value = [...content.value].length; scheduleAutoSave() })
-watch(() => route.params.id, loadCh)
-function kd(e: KeyboardEvent) { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); doSave() } }
+async function doSave(){if(saving.value||!content.value)return;saving.value=true;try{wordCount.value=[...content.value].length;await api.chapters.update(route.params.id as string,{content:content.value});lastSaved.value=new Date().toLocaleTimeString();await loadVer()}catch(_){}saving.value=false}
+function scheduleAutoSave(){if(autoSaveTimer)clearTimeout(autoSaveTimer);autoSaveTimer=setTimeout(doSave,30000)}
+watch(content,()=>{wordCount.value=[...content.value].length;scheduleAutoSave()})
+watch(()=>route.params.id,loadCh)
+function kd(e:KeyboardEvent){if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();doSave()}}
 
 // ====== DRAG ======
-function ds(e: MouseEvent) { dragging = true; e.preventDefault() }
-function dm(e: MouseEvent) { if (!dragging) return; const p = (e.clientX / window.innerWidth) * 100; leftW.value = Math.max(20, Math.min(80, p - 2)); rightW.value = 100 - leftW.value }
-function du() { dragging = false }
+function ds(e:MouseEvent){dragging=true;e.preventDefault()}
+function dm(e:MouseEvent){if(!dragging)return;const p=(e.clientX/window.innerWidth)*100;leftPct.value=Math.max(20,Math.min(80,p-2))}
+function du(){dragging=false}
 
-const editorLines = computed(() => content.value.split('\n'))
-const prevLines = computed(() => prevContent.value.split('\n'))
+// ====== SCROLL SYNC ======
+function syncFromLeft(){if(scrollLock)return;scrollLock=true
+  if(rightText.value){rightText.value.scrollTop=leftRead.value!.scrollTop;rightText.value.scrollLeft=leftRead.value!.scrollLeft}
+  requestAnimationFrame(()=>{scrollLock=false})}
+function syncFromRight(){if(scrollLock)return;scrollLock=true
+  if(leftRead.value){leftRead.value.scrollTop=rightText.value!.scrollTop;leftRead.value.scrollLeft=rightText.value!.scrollLeft}
+  requestAnimationFrame(()=>{scrollLock=false})}
 
-// ====== AI ======
-async function sendAi() {
-  const m = aiInput.value; if (!m.trim() || (!sDone.value && streamingMsg.value)) return
-  messages.value.push({ role: 'user', content: m }); aiInput.value = ''; sDone.value = false; streamingMsg.value = ''; toolCalls.value = []; aiLoading.value = true
-  try {
-    abortCtrl = new AbortController()
-    const r = await fetch('/api/agent/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: messages.value.filter((x: any) => !x._internal).map((x: any) => ({ role: x.role, content: x.content })), novelId: novelStore.currentNovelId, chapterId: parseInt(route.params.id as string), modelId: model.value || undefined, context: ctxType.value, sessionId: sessionId.value || undefined }), signal: abortCtrl.signal })
-    if (!r.ok) throw new Error('请求失败')
-    const reader = r.body!.getReader(); const dec = new TextDecoder(); let buf = ''
-    while (true) { const { value, done } = await reader.read(); if (done) break; buf += dec.decode(value, { stream: true }); for (const l of buf.split('\n')) { buf = ''; if (!l.startsWith('data: ')) continue; const dd = JSON.parse(l.slice(6)); switch (dd.type) { case 'chunk': streamingMsg.value += dd.text; break; case 'tool_start': toolCalls.value.push({ name: dd.toolName, status: 'pending', input: dd.toolInput }); break; case 'tool_end': { const tc = toolCalls.value.find(t => t.name === dd.toolName && t.status === 'pending'); if (tc) { tc.status = 'done'; tc.output = dd.toolOutput } } break; case 'error': console.error(dd.error); break; case 'done': sDone.value = true; break } } }
-    if (streamingMsg.value.trim()) messages.value.push({ role: 'assistant', content: streamingMsg.value, toolCalls: [...toolCalls.value] }); streamingMsg.value = ''
-  } catch (e: any) { if (e.name !== 'AbortError') { messages.value.push({ role: 'assistant', content: '错误: ' + e.message, error: true }); streamingMsg.value = '' } }
-  aiLoading.value = false; sDone.value = true
+// ====== DIFF RENDERING ======
+const prevLines=computed(()=>prevContent.value.split('\n'))
+const editorLines=computed(()=>content.value.split('\n'))
+
+// Build a map: line index → {type, cd}
+function buildLineMap(side:'left'|'right'):Record<number,{type:string,cd:any}>{
+  const m:Record<number,{type:string,cd:any}>={}
+  for(const bk of diffBlocks.value){
+    if(side==='left'&&bk.type==='insert')continue
+    if(side==='right'&&bk.type==='delete')continue
+    const cds=bk.charDiffs||[]
+    const lines=side==='left'?bk.leftLines:bk.rightLines
+    for(let i=lines[0];i<=lines[1];i++){
+      const cd=cds.find((c:any)=>side==='left'?c.oldLine===i-lines[0]:c.newLine===i-lines[0])||null
+      m[i]={type:bk.type,cd}
+    }
+  }
+  return m
 }
-function stopAi() { abortCtrl?.abort(); aiLoading.value = false; sDone.value = true; streamingMsg.value = '' }
-function mu() { const s = window.getSelection(); const t = s?.toString().trim(); if (t && t.length > 3) { selectedText.value = t; showInline.value = true } else showInline.value = false }
-function aiEditSel() { if (!selectedText.value) return; aiInput.value = `修改以下段落：\n\n${selectedText.value}`; showInline.value = false; setTimeout(() => sendAi(), 100) }
 
-function rm(t: string) { try { return marked.parse(t) as string } catch { return t } }
-const tl: Record<string, string> = { getChapter: '读章节', listChapters: '列表', searchChapters: '搜索', saveChapter: '保存', getStats: '统计', getActiveStyle: '文风', getOutline: '大纲', listCharacters: '角色', listForeshadowing: '伏笔', searchMemory: '记忆', saveMemory: '记忆', createStyleFromDescription: '文风', updateNovelConfig: '写作规范' }
-const sl: { [k: string]: string } = { synced: '已同步', pending: '待处理', audit: '审计中' }
+const prevLineMap=computed(()=>buildLineMap('left'))
+const editorLineMap=computed(()=>buildLineMap('right'))
+
+function lineBg(type:string,side:'left'|'right'):string{
+  if(side==='left'&&type==='delete')return'bg-red-100/60'
+  if(side==='right'&&type==='insert')return'bg-green-100/60'
+  return''
+}
+
+// Render a line of prevContent with char-level highlights
+function renderPrevLine(idx:number):string{
+  const text=prevLines.value[idx]||' '
+  const info=prevLineMap.value[idx]
+  if(!info||info.type==='equal'||!info.cd)return escHtml(text)
+  const cd=info.cd;const r=[...text]
+  const p=r.slice(0,cd.prefixLen).join('')
+  const end=cd.oldLen
+  const m=r.slice(cd.prefixLen,end-cd.suffixLen).join('')
+  const s=r.slice(end-cd.suffixLen).join('')
+  return escHtml(p)+'<span class="bg-red-300/60 rounded-sm">'+escHtml(m)+'</span>'+escHtml(s)
+}
+
+function escHtml(s:string):string{return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+// ====== AI (unchanged) ======
+async function sendAi(){
+  const m=aiInput.value;if(!m.trim()||(!sDone.value&&streamingMsg.value))return
+  messages.value.push({role:'user',content:m});aiInput.value='';sDone.value=false;streamingMsg.value='';toolCalls.value=[];aiLoading.value=true
+  try{
+    abortCtrl=new AbortController()
+    const r=await fetch('/api/agent/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:messages.value.filter((x:any)=>!x._internal).map((x:any)=>({role:x.role,content:x.content})),novelId:novelStore.currentNovelId,chapterId:parseInt(route.params.id as string),modelId:model.value||undefined,context:ctxType.value,sessionId:sessionId.value||undefined}),signal:abortCtrl.signal})
+    if(!r.ok)throw new Error('请求失败')
+    const reader=r.body!.getReader();const dec=new TextDecoder();let buf=''
+    while(true){const{value,done}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});for(const l of buf.split('\n')){buf='';if(!l.startsWith('data: '))continue;const dd=JSON.parse(l.slice(6));switch(dd.type){case'chunk':streamingMsg.value+=dd.text;break;case'tool_start':toolCalls.value.push({name:dd.toolName,status:'pending',input:dd.toolInput});break;case'tool_end':{const tc=toolCalls.value.find(t=>t.name===dd.toolName&&t.status==='pending');if(tc){tc.status='done';tc.output=dd.toolOutput}}break;case'error':console.error(dd.error);break;case'done':sDone.value=true;break}}}
+    if(streamingMsg.value.trim())messages.value.push({role:'assistant',content:streamingMsg.value,toolCalls:[...toolCalls.value]});streamingMsg.value=''
+  }catch(e:any){if(e.name!=='AbortError'){messages.value.push({role:'assistant',content:'错误: '+e.message,error:true});streamingMsg.value=''}}
+  aiLoading.value=false;sDone.value=true
+}
+function stopAi(){abortCtrl?.abort();aiLoading.value=false;sDone.value=true;streamingMsg.value=''}
+function mu(){const s=window.getSelection();const t=s?.toString().trim();if(t&&t.length>3){selectedText.value=t;showInline.value=true}else showInline.value=false}
+function aiEditSel(){if(!selectedText.value)return;aiInput.value=`修改以下段落：\n\n${selectedText.value}`;showInline.value=false;setTimeout(()=>sendAi(),100)}
+
+function rm(t:string){try{return marked.parse(t)as string}catch{return t}}
+const tl:Record<string,string>={getChapter:'读',saveChapter:'保存',getStats:'统计',getActiveStyle:'文风',getOutline:'大纲',listCharacters:'角色',listForeshadowing:'伏笔',searchMemory:'记忆',saveMemory:'记忆'}
+const sl:Record<string,string>={synced:'已同步',pending:'待处理',audit:'审计中'}
 </script>
 
 <template>
-  <div v-if="loading" class="flex justify-center py-20"><div class="w-8 h-8 border-2 border-[#d4d4d4] border-t-[#171717] rounded-full animate-spin" /></div>
+  <div v-if="loading" class="flex justify-center py-20"><div class="w-8 h-8 border-2 border-[#d4d4d4] border-t-[#171717] rounded-full animate-spin"/></div>
   <div v-else class="flex flex-col h-full bg-[#fafafa]">
 
     <!-- Top Bar -->
     <div class="flex items-center h-10 px-4 border-b border-[#e5e5e5] bg-white shrink-0 gap-3 text-sm z-10 shadow-sm">
       <button @click="router.back()" class="text-[#666] hover:text-[#1a1a1a] shrink-0"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></button>
-      <span class="font-semibold text-[#1a1a1a]">{{chapter.id}}</span><span class="text-[#666] truncate max-w-[160px]">{{chapter.title}}</span>
+      <span class="font-semibold text-[#1a1a1a]">{{chapter.id}}</span>
+      <span class="text-[#666] truncate max-w-[160px]">{{chapter.title}}</span>
       <span class="text-xs text-[#999] bg-[#f5f5f5] px-1.5 py-0.5 rounded">{{wordCount}}字</span>
       <NTag size="tiny" :type="chapter.status==='synced'?'success':chapter.status==='audit'?'warning':'default'" :bordered="false">{{sl[chapter.status]||chapter.status}}</NTag>
       <div class="flex-1"/>
@@ -128,44 +192,52 @@ const sl: { [k: string]: string } = { synced: '已同步', pending: '待处理',
       <NButton size="tiny" @click="doSave" :loading="saving">保存</NButton>
     </div>
 
-    <!-- Upper: 旧版 + 编辑区 并排 -->
-    <div class="flex-1 flex min-h-0 bg-white relative" style="max-height:55%">
-      <!-- LEFT: 旧版本（只读） -->
-      <div :style="{width:leftW+'%'}" class="border-r border-[#e5e5e5] flex flex-col shrink-0">
+    <!-- Two panels -->
+    <div class="flex-1 flex min-h-0 bg-white relative">
+
+      <!-- LEFT: 旧版区（只读 + diff 高亮） -->
+      <div :style="{width:leftPct+'%'}" class="border-r border-[#e5e5e5] flex flex-col shrink-0">
         <div class="h-7 px-3 flex items-center text-[11px] text-[#999] bg-[#fafafa] border-b border-[#e5e5e5] shrink-0 gap-2">
-          <svg width="11" height="11" viewBox="0 0 12 12"><circle cx="6" cy="6" r="4" fill="#fca5a5"/></svg>
-          <span v-if="selectedVer">v{{selectedVer.num}} · {{selectedVer.source}} · 旧版（只读）</span>
+          <span v-if="selectedVer">v{{selectedVer.num}} · 旧版（只读）</span>
           <span v-else>旧版（保存后自动加载）</span>
-          <span class="ml-auto text-[#ccc]">{{prevLines.length}}行</span>
+          <span class="ml-auto">{{prevLines.length}}行</span>
         </div>
-        <div class="flex-1 flex min-h-0" style="font-family:'Georgia','Noto Serif SC',serif">
+        <div class="flex-1 flex min-h-0 font-serif" style="font-family:'Georgia','Noto Serif SC',serif">
+          <!-- Gutter -->
           <div class="shrink-0 w-[40px] bg-[#fcfcfc] border-r border-[#f0f0f0] overflow-hidden select-none">
-            <div class="text-right pr-2 pt-3 text-[13px] leading-6 text-[#ccc] font-mono">
-              <div v-for="(_,i) in prevLines" :key="i" class="h-6">{{i+1}}</div>
+            <div class="text-right pr-2 pt-3 text-[13px] leading-6 font-mono">
+              <div v-for="(_,i) in prevLines" :key="i" class="h-6 text-[#ccc]" :class="lineBg(prevLineMap[i]?.type||'equal','left')">
+                <span class="text-[11px]">{{i+1}}</span>
+              </div>
             </div>
           </div>
-          <div class="flex-1 overflow-auto p-3 text-[13px] leading-6 text-[#888] font-serif whitespace-pre select-none" style="font-family:inherit">
-            {{prevContent || '（无内容）'}}
+          <!-- Content (readonly, with char-level highlights) -->
+          <div ref="leftRead" class="flex-1 overflow-auto p-3 text-[13px] leading-6 text-[#666] whitespace-pre select-none" style="font-family:inherit;white-space:pre" @scroll="syncFromLeft">
+            <div v-for="(_,i) in prevLines" :key="i" class="h-6" :class="lineBg(prevLineMap[i]?.type||'equal','left')" v-html="renderPrevLine(i)"/>
           </div>
         </div>
       </div>
 
-      <!-- Drag -->
+      <!-- Drag handle -->
       <div class="w-[3px] bg-transparent hover:bg-[#ddd] cursor-col-resize shrink-0 z-10" @mousedown="ds"/>
 
-      <!-- RIGHT: 编辑区 -->
-      <div :style="{width:rightW+'%'}" class="flex flex-col shrink-0 relative">
+      <!-- RIGHT: 编辑区（可写 + diff 高亮） -->
+      <div :style="{width:(100-leftPct)+'%'}" class="flex flex-col shrink-0 relative">
         <div class="h-7 px-3 flex items-center text-[11px] text-[#999] bg-[#fafafa] border-b border-[#e5e5e5] shrink-0 justify-between">
           <span>编辑区</span>
           <span>{{wordCount}}字 · {{editorLines.length}}行</span>
         </div>
-        <div class="flex-1 flex min-h-0" style="font-family:'Georgia','Noto Serif SC',serif">
+        <div class="flex-1 flex min-h-0 font-serif" style="font-family:'Georgia','Noto Serif SC',serif">
+          <!-- Gutter with diff colors -->
           <div class="shrink-0 w-[40px] bg-[#fcfcfc] border-r border-[#f0f0f0] overflow-hidden select-none">
-            <div class="text-right pr-2 pt-3 text-[13px] leading-6 text-[#ccc] font-mono">
-              <div v-for="(_,i) in editorLines" :key="i" class="h-6">{{i+1}}</div>
+            <div class="text-right pr-2 pt-3 text-[13px] leading-6 font-mono">
+              <div v-for="(_,i) in editorLines" :key="i" class="h-6 text-[#ccc]" :class="lineBg(editorLineMap[i]?.type||'equal','right')">
+                <span class="text-[11px]">{{i+1}}</span>
+              </div>
             </div>
           </div>
-          <textarea v-model="content" class="flex-1 resize-none border-0 outline-none text-[13px] leading-6 text-[#1a1a1a] bg-transparent p-3 placeholder:text-[#ddd]" placeholder="开始写作..." spellcheck="false" style="white-space:pre;overflow-wrap:normal;word-break:keep-all;tab-size:2;font-family:inherit" @mouseup="mu"/>
+          <!-- Textarea (can't do char highlights in textarea, but gutter shows line-level colors) -->
+          <textarea ref="rightText" v-model="content" class="flex-1 resize-none border-0 outline-none text-[13px] leading-6 text-[#1a1a1a] bg-transparent p-3 placeholder:text-[#ddd]" placeholder="开始写作..." spellcheck="false" style="white-space:pre;overflow-wrap:normal;word-break:keep-all;tab-size:2;font-family:inherit" @mouseup="mu" @scroll="syncFromRight"/>
         </div>
         <div v-if="showInline" class="absolute top-10 right-4 bg-white border border-[#e5e5e5] rounded-lg shadow-lg px-3 py-1.5 text-xs cursor-pointer hover:bg-[#f5f5f5] z-20" @click="aiEditSel">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="inline mr-1"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>AI 修改所选段落
@@ -173,33 +245,19 @@ const sl: { [k: string]: string } = { synced: '已同步', pending: '待处理',
       </div>
     </div>
 
-    <!-- Lower: CodeDiff between old (prevContent) and new (content) -->
-    <div class="border-t border-[#e5e5e5] bg-white" style="max-height:45%;flex:1;overflow:hidden">
-      <div class="h-6 px-3 flex items-center text-[11px] text-[#999] bg-[#fafafa] border-b border-[#eee] shrink-0 gap-2">
-        <svg width="11" height="11" viewBox="0 0 12 12"><path d="M2 6h3l1-3 1 6 1-3h3" stroke="#999" stroke-width="1" fill="none"/></svg>
-        <span>差异对比 ← v{selectedVer?.num} vs 当前</span>
-        <div class="flex-1"/>
-        <NPopconfirm v-if="selectedVer" @positive-click="rollback"><template #trigger><NButton size="tiny" type="error" ghost>还原到此版本</NButton></template>确定还原到 v{{selectedVer.num}}？</NPopconfirm>
-      </div>
-      <div class="overflow-auto" style="height:calc(100% - 24px)">
-        <CodeDiff :old-string="prevContent" :new-string="content" output-format="side-by-side" diff-style="char" language="plaintext" :context="9999"/>
-      </div>
-    </div>
-
-    <!-- Bottom bar: AI chat + version selector -->
+    <!-- Bottom: AI Chat + version bar -->
     <div class="border-t border-[#e5e5e5] bg-white shrink-0">
-      <!-- Version bar -->
       <div class="flex items-center h-7 px-3 bg-[#fafafa] gap-1 overflow-x-auto border-b border-[#eee]">
         <span class="text-[11px] text-[#999] mr-1 shrink-0">版本</span>
         <button v-for="ver in versions" :key="ver.id" @click="selectVer(ver)" class="text-[11px] px-2 py-0.5 rounded border shrink-0 transition-colors" :class="selectedVer?.id===ver.id?'bg-white border-[#bbb] text-[#1a1a1a] font-semibold shadow-sm':'border-transparent text-[#888] hover:bg-black/[0.02] hover:text-[#555]'">v{{ver.num}}</button>
+        <div class="flex-1"/>
+        <NPopconfirm v-if="selectedVer" @positive-click="rollback"><template #trigger><NButton size="tiny" type="error" ghost>还原到此版本</NButton></template>确定还原到 v{{selectedVer.num}}？</NPopconfirm>
       </div>
-
-      <!-- AI Chat -->
       <div class="h-7 px-3 flex items-center text-[11px] text-[#999] bg-[#fafafa] border-b border-[#eee] justify-between">
         <span>AI 对话</span>
         <button v-if="aiLoading" @click="stopAi" class="text-red-500 text-[11px]">停止</button>
       </div>
-      <div class="overflow-auto px-3 py-1.5 space-y-1.5 text-[12px]" style="max-height:160px">
+      <div class="overflow-auto px-3 py-1.5 space-y-1.5 text-[12px]" style="max-height:140px">
         <div v-if="messages.length===0&&!streamingMsg" class="text-center py-2 text-[#bbb]">AI 写作助手</div>
         <template v-for="(msg,i) in messages" :key="i">
           <div v-if="msg.role==='user'" class="flex justify-end"><div class="max-w-[80%] bg-[#e8e8e8] rounded-lg px-2 py-1 whitespace-pre-wrap">{{msg.content}}</div></div>
