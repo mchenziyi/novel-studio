@@ -142,7 +142,7 @@ const sl: { [k: string]: string } = { synced: '已同步', pending: '待处理',
           <div class="flex-1" />
           <NPopconfirm v-if="selectedVer" @positive-click="rollback"><template #trigger><NButton size="tiny" type="error" ghost>还原到此版本</NButton></template>确定还原到 v{{ selectedVer.num }}？</NPopconfirm>
         </div>
-        <div class="CodeDiff-wrapper flex-1 overflow-hidden bg-[#fefefe]">
+        <div class="flex-1 overflow-hidden bg-[#fefefe] diff-hide-header">
           <CodeDiff
             :old-string="prevContent"
             :new-string="content"
@@ -162,6 +162,11 @@ const sl: { [k: string]: string } = { synced: '已同步', pending: '待处理',
         <div class="h-7 px-3 flex items-center text-[11px] text-[#999] bg-[#fafafa] border-b border-[#e5e5e5] shrink-0 justify-between">
           <span>编辑区</span><span>{{ wordCount }}字 · {{ editorLines.length }}行</span>
         </div>
+        <style scoped>
+        .diff-hide-header :deep(.v-code-diff-header) { height: 0 !important; overflow: hidden !important; border: none !important; padding: 0 !important; margin: 0 !important; }
+        .diff-hide-header :deep(.old-diff-header) { height: 0 !important; overflow: hidden !important; border: none !important; padding: 0 !important; }
+        .diff-hide-header :deep(.new-diff-header) { height: 0 !important; overflow: hidden !important; border: none !important; padding: 0 !important; }
+        </style>
         <div class="flex-1 flex min-h-0" style="font-family: 'Georgia','Noto Serif SC', serif">
           <div class="shrink-0 w-[40px] bg-[#fcfcfc] border-r border-[#f0f0f0] overflow-hidden select-none">
             <div class="text-right pr-2 pt-4 text-[13px] leading-6 text-[#ccc] font-mono">
