@@ -25,8 +25,27 @@ export function NovelConfigPanel() {
   const loadConfig = async () => {
     try {
       const res = await fetch(`/api/novels/${currentNovelId}/config`);
-      const data = await res.json();
-      setConfig(data);
+      const raw = await res.json();
+      // Go 后端返回 map[string]string，值可能是逗号分隔的字符串
+      // v1 前端期望 string[]，需要转换
+      const parseArr = (v: any): string[] => {
+        if (Array.isArray(v)) return v;
+        if (typeof v === 'string' && v.trim()) return v.split(',').map(s => s.trim()).filter(Boolean);
+        return [];
+      };
+      const parseNum = (v: any, def: number): number => {
+        if (typeof v === 'number') return v;
+        const n = parseInt(v, 10);
+        return isNaN(n) ? def : n;
+      };
+      setConfig({
+        targetTotalWords: parseNum(raw.targetTotalWords, 0),
+        minWordsPerChapter: parseNum(raw.minWordsPerChapter, 2000),
+        maxWordsPerChapter: parseNum(raw.maxWordsPerChapter, 5000),
+        writingStyleRules: parseArr(raw.writingStyleRules),
+        forbiddenPatterns: parseArr(raw.forbiddenPatterns),
+        coreSettings: parseArr(raw.coreSettings),
+      });
     } catch (e) {
       console.error('Failed to load config:', e);
     } finally {
@@ -37,10 +56,19 @@ export function NovelConfigPanel() {
   const saveConfig = async (updates: Partial<NovelWritingConfig>) => {
     setSaving(true);
     try {
+      // 发送前将 string[] 转为逗号分隔字符串（Go 后端存储格式）
+      const payload: Record<string, any> = {};
+      for (const [k, v] of Object.entries(updates)) {
+        if (Array.isArray(v)) {
+          payload[k] = v.join(',');
+        } else {
+          payload[k] = v;
+        }
+      }
       await fetch(`/api/novels/${currentNovelId}/config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
+        body: JSON.stringify(payload),
       });
       setConfig(prev => prev ? { ...prev, ...updates } : prev);
     } catch (e) {
