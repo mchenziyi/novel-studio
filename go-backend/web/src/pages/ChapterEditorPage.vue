@@ -14,7 +14,7 @@ const saving = ref(false); const lastSaved = ref(''); const loading = ref(true)
 let autoSaveTimer: ReturnType<typeof setTimeout>|null = null
 
 // Layout
-const leftW = ref(28); const midW = ref(44); const rightW = ref(28)
+const leftW = ref(44); const midW = ref(44); const rightW = ref(12)
 let dragging: 'left'|'right'|null = null
 
 // Version diff
@@ -172,11 +172,11 @@ const sl:{[k:string]:string}={synced:'已同步',pending:'待处理',audit:'审�
           <span class="ml-auto">{{prevContent?leftLines.length+'行':''}}</span>
         </div>
         <div v-if="selectedVer" class="flex-1 flex min-h-0">
-          <div ref="leftGut" class="shrink-0 w-[44px] bg-[#fcfcfc] border-r border-[#f0f0f0] overflow-hidden select-none">
-            <div class="text-right pr-1.5 text-[11px] leading-6 text-[#ccc]">
+          <div ref="leftGut" class="shrink-0 w-[40px] bg-[#fcfcfc] border-r border-[#f0f0f0] overflow-hidden select-none">
+            <div class="text-right pr-2 text-[13px] leading-6 text-[#ccc] font-mono">
               <template v-for="(bk,bi) in diffBlocks" :key="'lg'+bi">
                 <template v-if="bk.type!=='insert'">
-                  <div v-for="li in (bk.leftLines[1]-bk.leftLines[0]+1)" :key="'lgi'+bi+'-'+li" class="h-6" :class="lc(bk.type,'left')">{{bk.leftLines[0]+li}}</div>
+                  <div v-for="li in (bk.leftLines[1]-bk.leftLines[0]+1)" :key="'lgi'+bi+'-'+li" class="h-6">{{bk.leftLines[0]+li}}</div>
                 </template>
               </template>
             </div>
@@ -185,7 +185,7 @@ const sl:{[k:string]:string}={synced:'已同步',pending:'待处理',audit:'审�
             <div class="text-[13px] leading-6 min-w-full" style="font-family:'Georgia','Noto Serif SC',serif">
               <template v-for="(bk,bi) in diffBlocks" :key="'lc'+bi">
                 <template v-if="bk.type!=='insert'">
-                  <div v-for="li in (bk.leftLines[1]-bk.leftLines[0]+1)" :key="'lci'+bi+'-'+li" class="whitespace-pre pl-2 pr-2 h-6" :class="lc(bk.type,'left')" v-html="rdl(leftLines[bk.leftLines[0]+li-1]||' ',bk.type,'left',(bk.charDiffs||[]).find((cd:any)=>cd.oldLine===li-1),li-1)"/>
+                  <div v-for="li in (bk.leftLines[1]-bk.leftLines[0]+1)" :key="'lci'+bi+'-'+li" class="whitespace-pre pl-3 pr-2 h-6" :class="lc(bk.type,'left')" v-html="rdl(leftLines[bk.leftLines[0]+li-1]||' ',bk.type,'left',(bk.charDiffs||[]).find((cd:any)=>cd.oldLine===li-1),li-1)"/>
                 </template>
               </template>
             </div>
@@ -203,8 +203,8 @@ const sl:{[k:string]:string}={synced:'已同步',pending:'待处理',audit:'审�
           <span>编辑区</span><span>{{wordCount}}字 · {{editorLines.length}}行</span>
         </div>
         <div class="flex-1 flex min-h-0" style="font-family:'Georgia','Noto Serif SC',serif">
-          <div ref="edtGut" class="shrink-0 w-[44px] bg-[#fcfcfc] border-r border-[#f0f0f0] overflow-hidden select-none">
-            <div class="text-right pr-1.5 pt-4 text-[11px] leading-6 text-[#ccc]">
+          <div ref="edtGut" class="shrink-0 w-[40px] bg-[#fcfcfc] border-r border-[#f0f0f0] overflow-hidden select-none">
+            <div class="text-right pr-2 pt-4 text-[13px] leading-6 text-[#ccc] font-mono">
               <div v-for="(_,i) in editorLines" :key="i" class="h-6">{{i+1}}</div>
             </div>
           </div>
