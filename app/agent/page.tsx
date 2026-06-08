@@ -6,6 +6,7 @@ import { useNovel } from '@/lib/novel-context';
 import { usePipeline } from '@/hooks/use-pipeline';
 import { PipelineVisualizer } from '@/components/agent/pipeline-visualizer';
 import { AuditDetail } from '@/components/agent/audit-detail';
+import { GovernancePanel } from '@/components/agent/governance-panel';
 import { cn } from '@/lib/utils';
 
 interface AgentDef {
@@ -182,8 +183,14 @@ export default function AgentPage() {
           )}
         </div>
 
-        {/* 右侧：Pipeline 可视化 + 审计详情 */}
+        {/* 右侧：治理 + Pipeline + 审计 */}
         <div className="space-y-5">
+          {/* 输入治理控制面 */}
+          <div className="bg-white rounded-lg border border-[#e8e8e8] p-4">
+            <h3 className="text-sm font-semibold text-gray-500 mb-3">📝 输入治理</h3>
+            <GovernancePanel novelId={currentNovelId} />
+          </div>
+
           {/* Pipeline 可视化 */}
           <div className="bg-white rounded-lg border border-[#e8e8e8] p-4">
             <div className="flex items-center justify-between mb-3">

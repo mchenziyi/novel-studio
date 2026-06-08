@@ -98,9 +98,9 @@ export function createSaveChapterTool(ctx: ToolContext) {
         agentName: 'ChatAgent',
         description: description || '通过 ChatAgent 保存',
       });
-      // 保存后标记为 audit 状态
+      // 保存后标记为 review 状态（需人工审阅）
       const db = getDatabase();
-      db.prepare("UPDATE chapters SET status = 'audit' WHERE id = ?").run(id);
+      db.prepare("UPDATE chapters SET status = 'review' WHERE id = ?").run(id);
       return {
         success: true,
         chapterId: id,

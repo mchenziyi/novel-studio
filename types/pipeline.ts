@@ -106,16 +106,20 @@ export interface PipelineConfig {
 export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
   maxRevisionRounds: 1,
   auditDimensions: [
-    'continuity',       // 连续性
-    'character',        // 角色一致性
-    'resource',         // 资源追踪
-    'foreshadowing',    // 伏笔回收
-    'pacing',           // 叙事节奏
-    'emotion',          // 情感弧线
-    'dialogue',         // 对话自然度
-    'ai_trace',         // AI 痕迹
-    'outline_deviation',// 大纲偏离
-    'word_count',       // 字数合规
+    // 连续性组
+    'continuity', 'character', 'resource', 'timeline', 'geography',
+    // 世界观组
+    'power_system', 'social_structure', 'world_rules',
+    // 叙事质量组
+    'foreshadowing', 'pacing', 'emotion', 'suspense', 'twist', 'dialogue', 'outline_deviation', 'subplot',
+    // 表达质量组
+    'ai_trace', 'sensory', 'environment', 'action', 'perspective', 'word_count',
+    // 结构组
+    'chapter_opening', 'chapter_ending', 'paragraph_flow', 'scene_transition',
+    // 细节组
+    'repetition', 'logic', 'consistency',
+    // 去AI味组
+    'vocabulary', 'sentence_pattern', 'cliche', 'summary',
   ],
   autoSave: true,
 };

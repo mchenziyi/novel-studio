@@ -401,6 +401,29 @@ function initializeDatabase(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_audit_results_pipeline_id ON audit_results(pipeline_id);
     CREATE INDEX IF NOT EXISTS idx_audit_dimension_results_audit_id ON audit_dimension_results(audit_id);
 
+    -- 输入治理控制面表
+    CREATE TABLE IF NOT EXISTS novel_governance (
+      novel_id TEXT NOT NULL,
+      doc_type TEXT NOT NULL CHECK(doc_type IN ('author_intent', 'current_focus')),
+      content TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (novel_id, doc_type),
+      FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
+    );
+
+    -- 运行时产物表
+    CREATE TABLE IF NOT EXISTS runtime_artifacts (
+      id TEXT PRIMARY KEY,
+      novel_id TEXT NOT NULL,
+      chapter_id INTEGER NOT NULL,
+      artifact_type TEXT NOT NULL CHECK(artifact_type IN ('intent', 'context', 'rule_stack', 'trace')),
+      content TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_runtime_artifacts_novel_chapter ON runtime_artifacts(novel_id, chapter_id);
+
     CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance);
     CREATE INDEX IF NOT EXISTS idx_story_facts_novel_id ON story_facts(novel_id);
     CREATE INDEX IF NOT EXISTS idx_story_facts_chapter ON story_facts(chapter);

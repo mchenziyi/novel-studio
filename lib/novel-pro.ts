@@ -2,6 +2,8 @@ import { callModel, ModelType } from './models';
 import { getChapters, getCharacters, getForeshadowing, getOutline, getSyncStatus } from './file-system';
 import { saveChapterWithVersion } from './version-control';
 import { saveAuditResult } from './audit-results';
+import { getDatabase } from './database';
+import { getAgentModel } from './model-routes';
 import {
   AgentType,
   Pipeline,
@@ -33,13 +35,27 @@ export const agents: Record<AgentType, {
 
 // ==================== 单个 Agent 执行 ====================
 
-export async function runPlanner(chapterId: number, model: ModelType = 'claude'): Promise<any> {
+export async function runPlanner(chapterId: number, model: ModelType = 'claude', novelId?: string): Promise<any> {
   const outline = await getOutline();
   const characters = await getCharacters();
   const foreshadowing = await getForeshadowing();
 
+  // 输入治理：注入作者意图 + 当前焦点
+  let governanceSection = '';
+  if (novelId) {
+    const { getGovernanceContext } = require('./governance');
+    const ctx = getGovernanceContext(novelId);
+    if (ctx.authorIntent) {
+      governanceSection += `\n\n## 作者长期意图（必须尊重）\n${ctx.authorIntent}`;
+    }
+    if (ctx.currentFocus) {
+      governanceSection += `\n\n## 当前阶段焦点（近期注意力）\n${ctx.currentFocus}`;
+    }
+  }
+
   const prompt = `
 你是一个小说规划专家。请为第${chapterId}章生成章节意图。
+${governanceSection}
 
 大纲：
 ${JSON.stringify(outline, null, 2)}
@@ -193,17 +209,47 @@ ${JSON.stringify(observations, null, 2)}
 
 // ==================== 多维审计系统 ====================
 
-const AUDIT_DIMENSIONS = {
-  continuity:     { label: '连续性',      prompt: '检查章节内容与前文是否连贯。有无前文已经发生但这里矛盾的事件？有无突然出现没有铺垫的事物？' },
-  character:      { label: '角色一致性',   prompt: '检查角色行为是否符合其性格设定。有无角色突然改变了说话方式、性格、动机？' },
-  resource:       { label: '资源追踪',    prompt: '检查资源的增减是否合理。如武器、金钱、物品等有无凭空出现或消失？' },
-  foreshadowing:  { label: '伏笔回收',    prompt: '检查伏笔处理是否合理。有无可以推进/回收但被忽略的伏笔？有无过早泄露的伏笔？' },
-  pacing:         { label: '叙事节奏',    prompt: '检查节奏是否合理。有无拖沓的段落？有无过于仓促的转折？段落间的节奏变化是否自然？' },
-  emotion:        { label: '情感弧线',    prompt: '检查角色情感变化是否自然。有无突然的情绪跳跃？情感变化是否铺垫充分？' },
-  dialogue:       { label: '对话自然度',   prompt: '检查对话是否自然。有无生硬的对话？每个角色的说话风格是否区分？有无 AI 感的对话模式？' },
-  ai_trace:       { label: 'AI 痕迹',     prompt: '专门检查 AI 生成痕迹。有无模板化表达（如"他深吸一口气"、"不禁莞尔"、"目光深邃"）？有无过度总结的段落？有无不自然的排比句式？词频是否有明显重复模式？' },
-  outline_deviation: { label: '大纲偏离', prompt: '检查内容是否严重偏离大纲规划。有无遗漏大纲中的关键事件？有无大纲未规划的重大情节？' },
-  word_count:     { label: '字数合规',    prompt: '检查字数是否在 2000-5000 字范围内。是否有明显的水字数段落？是否有过短的情况？' },
+const AUDIT_DIMENSIONS: Record<string, { label: string; prompt: string; group: string }> = {
+  // === 连续性组 ===
+  continuity:        { label: '连续性',       prompt: '检查章节内容与前文是否连贯。有无前文已经发生但这里矛盾的事件？有无突然出现没有铺垫的事物？', group: '连续性' },
+  character:         { label: '角色一致性',    prompt: '检查角色行为是否符合其性格设定。有无角色突然改变了说话方式、性格、动机？角色是否记起从未亲眼见过的事？', group: '连续性' },
+  resource:          { label: '资源追踪',     prompt: '检查资源的增减是否合理。如武器、金钱、物品等有无凭空出现或消失？有无两章前已丢失的物品突然出现？', group: '连续性' },
+  timeline:          { label: '时间线一致',    prompt: '检查时间线是否合理。事件发生顺序是否矛盾？有无时间跳跃但未交代？角色是否同时出现在两个地方？', group: '连续性' },
+  geography:         { label: '空间一致',     prompt: '检查地理和空间描述是否一致。角色位置变化是否合理？距离和移动时间是否符合设定？', group: '连续性' },
+  // === 世界观组 ===
+  power_system:      { label: '能力体系',     prompt: '检查魔法/修炼/超能力体系是否一致。有无超出已设定规则的能力使用？有无违反已建立的力量等级？', group: '世界观' },
+  social_structure:  { label: '社会结构',     prompt: '检查社会等级、组织结构是否一致。有无违反已设定的社会规则？权力关系是否合理？', group: '世界观' },
+  world_rules:       { label: '世界规则',     prompt: '检查世界观规则是否被遵守。有无违反已确立的物理/魔法/社会法则？', group: '世界观' },
+  // === 叙事质量组 ===
+  foreshadowing:     { label: '伏笔回收',     prompt: '检查伏笔处理是否合理。有无可以推进/回收但被忽略的伏笔？有无过早泄露的伏笔？有无重复铺设已有的伏笔？', group: '叙事质量' },
+  pacing:            { label: '叙事节奏',     prompt: '检查节奏是否合理。有无拖沓的段落？有无过于仓促的转折？段落间的节奏变化是否自然？', group: '叙事质量' },
+  emotion:           { label: '情感弧线',     prompt: '检查角色情感变化是否自然。有无突然的情绪跳跃？情感变化是否铺垫充分？角色成长弧线是否连贯？', group: '叙事质量' },
+  suspense:          { label: '悬念设置',     prompt: '检查悬念是否有效。章末钩子是否足够吸引？悬念的铺垫和揭示是否自然？有无悬念被遗忘？', group: '叙事质量' },
+  twist:             { label: '转折自然度',    prompt: '检查情节转折是否自然。有无强行转折？转折是否有足够的铺垫？是否符合"意料之外，情理之中"？', group: '叙事质量' },
+  dialogue:          { label: '对话自然度',    prompt: '检查对话是否自然。有无生硬的对话？每个角色的说话风格是否区分？有无 AI 感的对话模式？对话是否推动情节？', group: '叙事质量' },
+  outline_deviation: { label: '大纲偏离',     prompt: '检查内容是否严重偏离大纲规划。有无遗漏大纲中的关键事件？有无大纲未规划的重大情节？', group: '叙事质量' },
+  subplot:           { label: '支线推进',     prompt: '检查支线是否合理推进或休眠。有无支线停滞过久？支线与主线的交叉是否自然？', group: '叙事质量' },
+  // === 表达质量组 ===
+  ai_trace:          { label: 'AI 痕迹',     prompt: '专门检查 AI 生成痕迹。有无模板化表达（如"他深吸一口气"、"不禁莞尔"、"目光深邃"）？有无过度总结的段落？有无不自然的排比句式？词频是否有明显重复模式？', group: '表达质量' },
+  sensory:           { label: '感官描写',     prompt: '检查感官描写是否丰富。有无只有视觉而忽略听觉/触觉/嗅觉/味觉？场景描写是否让人身临其境？', group: '表达质量' },
+  environment:       { label: '环境描写',     prompt: '检查环境描写是否充分。场景转换时环境是否交代清楚？环境描写是否服务于情节和情绪？', group: '表达质量' },
+  action:            { label: '动作场面',     prompt: '检查动作/战斗场面质量。动作描写是否清晰有力？节奏是否紧凑？有无混乱难懂的段落？', group: '表达质量' },
+  perspective:       { label: '叙述视角',     prompt: '检查叙述视角是否一致。有无突然跳到其他角色的视角？有无泄露主角不该知道的信息？', group: '表达质量' },
+  word_count:        { label: '字数合规',     prompt: '检查字数是否在 2000-5000 字范围内。是否有明显的水字数段落？是否有过短的情况？', group: '表达质量' },
+  // === 结构组 ===
+  chapter_opening:   { label: '章首吸引力',    prompt: '检查章节开头是否吸引人。前三段是否能抓住读者？有无平淡的开场？', group: '结构' },
+  chapter_ending:    { label: '章尾钩子',     prompt: '检查章节结尾是否留有钩子。读者是否有动力继续看下一章？有无平淡的结尾？', group: '结构' },
+  paragraph_flow:    { label: '段落过渡',     prompt: '检查段落之间的过渡是否自然。有无突兀的跳转？场景切换是否有交代？', group: '结构' },
+  scene_transition:  { label: '场景转换',     prompt: '检查场景转换是否清晰。时间/地点变化是否有标记？有无让读者困惑的跳转？', group: '结构' },
+  // === 细节组 ===
+  repetition:        { label: '重复检测',     prompt: '检查是否有重复的表达、情节、或描写。同一词汇是否过度使用？有无与前文重复的段落？', group: '细节' },
+  logic:             { label: '逻辑自洽',     prompt: '检查情节逻辑是否自洽。因果关系是否合理？有无逻辑漏洞？角色决策是否有充分动机？', group: '细节' },
+  consistency:       { label: '细节一致',     prompt: '检查细节描述是否前后一致。外貌描写、物品描述、环境细节是否与前文矛盾？', group: '细节' },
+  // === 去AI味组 ===
+  vocabulary:        { label: '词汇疲劳',     prompt: '检查是否有 AI 常用的高频词汇。如"仿佛"、"似乎"、"不禁"、"竟然"、"居然"等是否过度使用？', group: '去AI味' },
+  sentence_pattern:  { label: '句式单调',     prompt: '检查句式是否单调。是否大量使用"主语+谓语+宾语"的简单句？有无长短句交替？有无修辞变化？', group: '去AI味' },
+  cliche:            { label: '陈词滥调',     prompt: '检查是否有陈词滥调。如"心中一凛"、"嘴角微微上扬"、"眼中闪过一丝XX"等是否大量出现？', group: '去AI味' },
+  summary:           { label: '过度总结',     prompt: '检查是否有过度总结的段落。如"经过一番XX"、"在XX的帮助下"等跳过具体描写的总结性语句。', group: '去AI味' },
 };
 
 export async function runAuditor(
@@ -442,42 +488,66 @@ export async function runStreamingPipeline(
 
   emitEvent('pipeline_start', { chapterId, model, stepsCount: pipeline.steps.length });
 
+  // 模型路由：为每个 agent 解析实际使用的模型
+  const resolveModel = (agentId: AgentType): ModelType => getAgentModel(novelId, agentId, model);
+
   try {
     // Step 1: Planner
+    const plannerModel = resolveModel('planner');
     const plannerResult = await executeStep(pipeline, 0, async () => {
-      return await runPlanner(chapterId, model);
+      return await runPlanner(chapterId, plannerModel, novelId);
     }, emitEvent);
+
+    // 保存运行时产物：章节意图
+    try {
+      const { saveRuntimeArtifact } = require('./runtime-artifacts');
+      saveRuntimeArtifact(novelId, chapterId, 'intent', plannerResult);
+    } catch {}
 
     // Step 2: Composer
+    const composerModel = resolveModel('composer');
     const composerResult = await executeStep(pipeline, 1, async () => {
-      return await runComposer(chapterId, plannerResult, model);
+      return await runComposer(chapterId, plannerResult, composerModel);
     }, emitEvent);
+
+    // 保存运行时产物：上下文包
+    try {
+      const { saveRuntimeArtifact } = require('./runtime-artifacts');
+      saveRuntimeArtifact(novelId, chapterId, 'context', composerResult);
+    } catch {}
 
     // Step 3: Writer
+    const writerModel = resolveModel('writer');
     const content = await executeStep(pipeline, 2, async () => {
-      return await runWriter(chapterId, plannerResult, composerResult, model);
+      return await runWriter(chapterId, plannerResult, composerResult, writerModel);
     }, emitEvent);
 
-    // 自动保存
+    // 自动保存 → 设置为待审阅状态
     if (config.autoSave) {
       try {
         await saveChapterWithVersion(String(chapterId).padStart(4, '0'), content, 'agent', {
           agentName: 'Pipeline',
           description: `Pipeline 自动保存（planner→composer→writer）`,
         });
+        // Pipeline 写完后设置为 review 状态（需人工审阅）
+        const db = getDatabase();
+        db.prepare("UPDATE chapters SET status = 'review', updated_at = ? WHERE id = ?")
+          .run(new Date().toISOString(), String(chapterId).padStart(4, '0'));
       } catch (saveErr) {
         console.error('Pipeline auto-save failed:', saveErr);
       }
     }
 
     // Step 4: Observer
+    const observerModel = resolveModel('observer');
     const observations = await executeStep(pipeline, 3, async () => {
-      return await runObserver(chapterId, content, model);
+      return await runObserver(chapterId, content, observerModel);
     }, emitEvent);
 
     // Step 5: Settler
+    const settlerModel = resolveModel('settler');
     const settlement = await executeStep(pipeline, 4, async () => {
-      return await runSettler(chapterId, observations, model);
+      return await runSettler(chapterId, observations, settlerModel);
     }, emitEvent);
 
     // Settler 后：同步到真理文件 DB 表
@@ -488,8 +558,9 @@ export async function runStreamingPipeline(
     let auditResult: AuditResult | undefined;
 
     for (let round = 0; round <= config.maxRevisionRounds; round++) {
+      const auditorModel = resolveModel('auditor');
       auditResult = await executeStep(pipeline, 5, async () => {
-        return await runAuditor(chapterId, currentContent, model, config, round > 0 ? auditResult : undefined);
+        return await runAuditor(chapterId, currentContent, auditorModel, config, round > 0 ? auditResult : undefined);
       }, emitEvent);
 
       auditResult.pipelineId = pipelineId;
@@ -527,7 +598,8 @@ export async function runStreamingPipeline(
       pipeline.steps[reviserIdx].startedAt = new Date().toISOString();
 
       try {
-        currentContent = await runReviser(chapterId, currentContent, auditResult, model);
+        const reviserModel = resolveModel('reviser');
+        currentContent = await runReviser(chapterId, currentContent, auditResult, reviserModel);
         pipeline.steps[reviserIdx].status = 'completed';
         pipeline.steps[reviserIdx].output = { wordCount: currentContent.length };
         pipeline.steps[reviserIdx].completedAt = new Date().toISOString();
