@@ -1,7 +1,10 @@
-export type AgentType = 'planner' | 'composer' | 'writer' | 'observer' | 'settler' | 'auditor' | 'reviser';
+// Re-export pipeline types as the canonical agent types
+export type { AgentType, PipelineStep as WorkflowStep, Pipeline as Workflow } from './pipeline';
+
+import type { Pipeline, PipelineStep } from './pipeline';
 
 export interface Agent {
-  id: AgentType;
+  id: string;
   name: string;
   description: string;
   icon: string;
@@ -10,30 +13,12 @@ export interface Agent {
 
 export interface AgentTask {
   id: string;
-  agentId: AgentType;
+  agentId: string;
   chapterId: number;
   status: 'pending' | 'running' | 'completed' | 'failed';
   input?: any;
   output?: any;
   error?: string;
-  startTime: Date;
-  endTime?: Date;
-}
-
-export interface WorkflowStep {
-  agentId: AgentType;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
-  output?: any;
-  error?: string;
-}
-
-export interface Workflow {
-  id: string;
-  name: string;
-  description: string;
-  steps: WorkflowStep[];
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  chapterId: number;
   startTime: Date;
   endTime?: Date;
 }

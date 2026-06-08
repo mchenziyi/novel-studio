@@ -14,11 +14,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const workflow = await runWorkflow(chapterId, model as ModelType);
+    const pipeline = await runWorkflow(chapterId, model as ModelType);
 
     return NextResponse.json({
       success: true,
-      workflow,
+      workflow: pipeline,
     });
   } catch (error) {
     console.error('Failed to run workflow:', error);

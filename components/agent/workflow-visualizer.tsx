@@ -115,7 +115,7 @@ export function WorkflowVisualizer({ workflow, loading = false }: WorkflowVisual
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="font-semibold">{workflow.name}</h3>
-          <p className="text-sm text-gray-500">{workflow.description}</p>
+          <p className="text-sm text-gray-500">自动化写作管线</p>
         </div>
         <span
           className={cn(

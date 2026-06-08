@@ -369,6 +369,38 @@ function initializeDatabase(db: Database.Database) {
       FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
     );
 
+    -- 审计结果表
+    CREATE TABLE IF NOT EXISTS audit_results (
+      id TEXT PRIMARY KEY,
+      chapter_id INTEGER NOT NULL,
+      pipeline_id TEXT NOT NULL,
+      passed INTEGER NOT NULL DEFAULT 0,
+      summary TEXT,
+      total_issues INTEGER DEFAULT 0,
+      critical_count INTEGER DEFAULT 0,
+      warning_count INTEGER DEFAULT 0,
+      info_count INTEGER DEFAULT 0,
+      overall_score INTEGER DEFAULT 0,
+      timestamp TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- 审计维度详情表
+    CREATE TABLE IF NOT EXISTS audit_dimension_results (
+      id TEXT PRIMARY KEY,
+      audit_id TEXT NOT NULL,
+      dimension_name TEXT NOT NULL,
+      dimension_label TEXT NOT NULL,
+      passed INTEGER NOT NULL DEFAULT 0,
+      score INTEGER DEFAULT 0,
+      issues_json TEXT DEFAULT '[]',
+      FOREIGN KEY (audit_id) REFERENCES audit_results(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_results_chapter_id ON audit_results(chapter_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_results_pipeline_id ON audit_results(pipeline_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_dimension_results_audit_id ON audit_dimension_results(audit_id);
+
     CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance);
     CREATE INDEX IF NOT EXISTS idx_story_facts_novel_id ON story_facts(novel_id);
     CREATE INDEX IF NOT EXISTS idx_story_facts_chapter ON story_facts(chapter);

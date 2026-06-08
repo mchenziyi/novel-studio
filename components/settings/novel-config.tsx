@@ -26,8 +26,7 @@ export function NovelConfigPanel() {
     try {
       const res = await fetch(`/api/novels/${currentNovelId}/config`);
       const raw = await res.json();
-      // Go 后端返回 map[string]string，值可能是逗号分隔的字符串
-      // v1 前端期望 string[]，需要转换
+      // 值可能是数组或逗号分隔的字符串，统一转为 string[]
       const parseArr = (v: any): string[] => {
         if (Array.isArray(v)) return v;
         if (typeof v === 'string' && v.trim()) return v.split(',').map(s => s.trim()).filter(Boolean);
@@ -56,7 +55,7 @@ export function NovelConfigPanel() {
   const saveConfig = async (updates: Partial<NovelWritingConfig>) => {
     setSaving(true);
     try {
-      // 发送前将 string[] 转为逗号分隔字符串（Go 后端存储格式）
+      // 发送前将 string[] 转为逗号分隔字符串（兼容存储格式）
       const payload: Record<string, any> = {};
       for (const [k, v] of Object.entries(updates)) {
         if (Array.isArray(v)) {

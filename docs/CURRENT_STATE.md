@@ -1,6 +1,6 @@
 # 当前开发状态
 
-> 最后更新: 2026-06-01
+> 最后更新: 2026-06-03
 
 ## 已完成功能
 
@@ -27,10 +27,22 @@
 - [x] `diff` 库动态导入（ESM 兼容）
 - [x] ErrorBoundary 错误捕获
 
+### Pipeline 自动化写作系统（新增）
+- [x] **SSE 流式 Pipeline 引擎** — 从阻塞式串行改为实时推送每步进度
+- [x] **多维审计系统** — 10 个维度审计（连续性/角色/资源/伏笔/节奏/情感/对话/AI痕迹/大纲/字数）
+- [x] **自动修订循环** — 审计发现问题后自动调 Reviser，支持配置最大修订轮数（默认1轮）
+- [x] **审计结果持久化** — `audit_results` + `audit_dimension_results` 表，按维度存储问题详情
+- [x] **Pipeline SSE API** — `POST /api/agent/pipeline`，流式返回步骤事件
+- [x] **审计结果 API** — `GET /api/agent/audit?chapterId=&latest=true`
+- [x] **PipelineVisualizer 组件** — 实时展示各 Agent 步骤状态、修订标记、审计评分
+- [x] **AuditDetail 组件** — 详细审计报告（分数/维度展开/问题分类/修复建议）
+- [x] **usePipeline Hook** — 前端 SSE 消费层，管理 Pipeline 全生命周期状态
+- [x] **Agent 工作台升级** — 集成 Pipeline 运行器，可配置修订轮数
+
 ### 基础设施
 - [x] 根布局（Sidebar + main content）
 - [x] 侧边栏导航
-- [x] 数据库 schema 和迁移
+- [x] 数据库 schema 和迁移（含 audit 表）
 - [x] ErrorBoundary 组件
 - [x] 测试框架（Jest, 6 suites, 65 tests）
 
@@ -55,7 +67,9 @@
 
 ## 未开始
 
-- [ ] Agent 系统实际调用 AI 模型
+- [ ] 真理文件系统 — 人类可读的 Markdown 真相文件视图（参考 inkos TruthFiles）
+- [ ] 真理文件查看/编辑页面
+- [ ] Settler 自动同步真理文件
 - [ ] 角色关系图可视化 (D3.js)
 - [ ] 伏笔追踪可视化
 - [ ] 情节线时间线
